@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'minecraft_v1_worlds';
+const randomSeed = () => Math.floor(Math.random() * 10 ** 9).toString();
 
 const mainMenu = document.querySelector('#main-menu');
 const worldsMenu = document.querySelector('#worlds-menu');
@@ -38,8 +39,6 @@ const loadWorlds = () => {
 const saveWorlds = (worlds) => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(worlds));
 };
-
-const randomSeed = () => Math.floor(Math.random() * 10 ** 9).toString();
 
 const createWorld = (seed) => {
   const worlds = loadWorlds();
@@ -122,32 +121,47 @@ const openSeedDialog = () => {
   createWorld((manualSeed || '').trim() || randomSeed());
 };
 
-btnSolo.addEventListener('click', showWorldsMenu);
-btnBack.addEventListener('click', showMainMenu);
-btnNewWorld.addEventListener('click', openSeedDialog);
+if (
+  mainMenu &&
+  worldsMenu &&
+  worldList &&
+  btnSolo &&
+  btnBack &&
+  btnNewWorld &&
+  seedDialog &&
+  btnRandomSeed &&
+  btnCustomSeed &&
+  btnSaveCustom &&
+  btnCancel &&
+  seedInput
+) {
+  btnSolo.addEventListener('click', showWorldsMenu);
+  btnBack.addEventListener('click', showMainMenu);
+  btnNewWorld.addEventListener('click', openSeedDialog);
 
-btnRandomSeed.addEventListener('click', () => {
-  createWorld(randomSeed());
-  seedDialog.close();
-});
+  btnRandomSeed.addEventListener('click', () => {
+    createWorld(randomSeed());
+    seedDialog.close();
+  });
 
-btnCustomSeed.addEventListener('click', () => {
-  customSeedEnabled = true;
-  seedInput.disabled = false;
-  seedInput.focus();
-});
+  btnCustomSeed.addEventListener('click', () => {
+    customSeedEnabled = true;
+    seedInput.disabled = false;
+    seedInput.focus();
+  });
 
-btnSaveCustom.addEventListener('click', () => {
-  if (!customSeedEnabled) {
-    alert('Primero selecciona "Elegir seed" o usa la opción "Aleatoria".');
-    return;
-  }
+  btnSaveCustom.addEventListener('click', () => {
+    if (!customSeedEnabled) {
+      alert('Primero selecciona "Elegir seed" o usa la opción "Aleatoria".');
+      return;
+    }
 
-  const value = seedInput.value.trim();
-  createWorld(value || randomSeed());
-  seedDialog.close();
-});
+    const value = seedInput.value.trim();
+    createWorld(value || randomSeed());
+    seedDialog.close();
+  });
 
-btnCancel.addEventListener('click', () => {
-  seedDialog.close();
-});
+  btnCancel.addEventListener('click', () => {
+    seedDialog.close();
+  });
+}
