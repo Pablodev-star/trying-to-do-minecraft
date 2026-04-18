@@ -7,16 +7,44 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="menu-screen" aria-label="Menú de inicio">
-      <h1 class="game-title">MINECRAFT</h1>
-      <p class="subtitle">Versión 1 (prototipo)</p>
+    <main class="menu-screen" aria-live="polite">
+      <section id="main-menu" class="panel" aria-label="Menú principal">
+        <h1 class="game-title">MINECRAFT</h1>
+        <p class="subtitle">Versión 1 (prototipo)</p>
 
-      <nav class="menu-buttons" aria-label="Opciones principales">
-        <button type="button" class="menu-btn">Un jugador</button>
-        <button type="button" class="menu-btn">Multijugador</button>
-        <button type="button" class="menu-btn">Opciones...</button>
-        <button type="button" class="menu-btn">Salir del juego</button>
-      </nav>
+        <nav class="menu-buttons" aria-label="Opciones principales">
+          <button type="button" id="btn-solo" class="menu-btn">Solitario</button>
+          <button type="button" class="menu-btn">Multijugador</button>
+          <button type="button" class="menu-btn">Opciones...</button>
+          <button type="button" class="menu-btn">Salir del juego</button>
+        </nav>
+      </section>
+
+      <section id="worlds-menu" class="panel hidden" aria-label="Tus mundos">
+        <h2 class="section-title">Tus mundos</h2>
+        <ul id="world-list" class="world-list" aria-live="polite"></ul>
+
+        <div class="menu-buttons">
+          <button type="button" id="btn-new-world" class="menu-btn">Nuevo mundo</button>
+          <button type="button" id="btn-back" class="menu-btn">Volver</button>
+        </div>
+      </section>
+
+      <dialog id="seed-dialog" class="seed-dialog">
+        <form id="seed-form" method="dialog" class="seed-form">
+          <p class="seed-question">¿Quieres elegir una seed o usar una aleatoria?</p>
+          <div class="seed-actions">
+            <button type="button" id="btn-random-seed" class="menu-btn">Aleatoria</button>
+            <button type="button" id="btn-custom-seed" class="menu-btn">Elegir seed</button>
+          </div>
+          <label for="seed-input" class="seed-label">Seed personalizada (opcional)</label>
+          <input id="seed-input" name="seed" type="text" maxlength="40" placeholder="Ej: montanas123" />
+          <div class="seed-actions">
+            <button type="button" id="btn-save-custom" class="menu-btn">Guardar mundo</button>
+            <button type="button" id="btn-cancel" class="menu-btn">Cancelar</button>
+          </div>
+        </form>
+      </dialog>
     </main>
 
     <script src="script.js"></script>
