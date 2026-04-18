@@ -934,6 +934,13 @@ const closeWorld = () => {
   showWorldsMenu();
 };
 
+if (btnSolo) btnSolo.addEventListener('click', showWorldsMenu);
+if (btnBack) btnBack.addEventListener('click', showMainMenu);
+if (btnOpenWorld) btnOpenWorld.addEventListener('click', openWorld);
+if (btnNewWorld) btnNewWorld.addEventListener('click', openSeedDialog);
+if (btnExitWorld) btnExitWorld.addEventListener('click', closeWorld);
+
+if (btnRandomSeed && seedDialog) {
 if (
   btnSolo &&
   btnBack &&
@@ -957,12 +964,18 @@ if (
     createWorld(randomSeed());
     seedDialog.close();
   });
+}
+
+if (btnCustomSeed && seedInput) {
 
   btnCustomSeed.addEventListener('click', () => {
     customSeedEnabled = true;
     seedInput.disabled = false;
     seedInput.focus();
   });
+}
+
+if (btnSaveCustom && seedInput && seedDialog) {
 
   btnSaveCustom.addEventListener('click', () => {
     if (!customSeedEnabled) {
@@ -974,6 +987,9 @@ if (
     createWorld(value || randomSeed());
     seedDialog.close();
   });
+}
+
+if (btnCancel && seedDialog) {
 
   btnCancel.addEventListener('click', () => {
     seedDialog.close();

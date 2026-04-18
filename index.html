@@ -61,5 +61,24 @@
     </section>
 
     <script type="module" src="script.js"></script>
+    <script>
+      // Fallback mínimo de navegación de menú por si el módulo principal no llega a cargar.
+      (() => {
+        const main = document.getElementById('main-menu');
+        const worlds = document.getElementById('worlds-menu');
+        const solo = document.getElementById('btn-solo');
+        const back = document.getElementById('btn-back');
+        if (!main || !worlds || !solo || !back) return;
+
+        solo.addEventListener('click', () => {
+          main.classList.add('hidden');
+          worlds.classList.remove('hidden');
+        });
+        back.addEventListener('click', () => {
+          worlds.classList.add('hidden');
+          main.classList.remove('hidden');
+        });
+      })();
+    </script>
   </body>
 </html>
