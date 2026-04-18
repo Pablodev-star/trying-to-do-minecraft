@@ -255,12 +255,14 @@ const renderSlots = (container, from, to, options = {}) => {
       if (!gameState.inventoryOpen) return;
       handleSlotClick(i);
     });
+    slot.addEventListener('click', () => handleSlotClick(i));
     container.append(slot);
   }
 };
 
 const renderHotbar = () => {
   renderSlots(hotbarEl, 0, 9, { selectedIndexOffset: gameState.selectedHotbar, mode: 'hotbar' });
+  renderSlots(hotbarEl, 0, 9, gameState.selectedHotbar);
 };
 
 const renderInventory = () => {
@@ -272,6 +274,7 @@ const renderInventory = () => {
   inventoryPanel.dataset.carrying = gameState.carriedItem
     ? `Llevando: ${gameState.carriedItem.type} x${gameState.carriedItem.count}`
     : 'Llevando: vacío';
+  renderSlots(inventoryGrid, 0, 36, gameState.inventoryOpen ? gameState.selectedHotbar : null);
 };
 
 const handleSlotClick = (index) => {
@@ -696,6 +699,7 @@ const breakBlock = (blockHit) => {
   gameState.blocks.delete(key);
   const dropType = type === 'grass' ? 'dirt' : type === 'dirt' ? 'dirt' : null;
   if (dropType) addItemToInventory(dropType, 1);
+  addItemToInventory(type, 1);
 
   updateWorld(gameState.currentWorldId, (world) => {
     const removed = new Set(world.removedBlocks);
@@ -813,6 +817,15 @@ const updateCamera = (delta) => {
     forward.set(Math.sin(gameState.yaw), 0, -Math.cos(gameState.yaw));
   }
   forward.normalize();
+  if (gameState.inventoryOpen) {
+    gameState.camera.position.set(gameState.playerPos.x, gameState.playerPos.y + EYE_HEIGHT, gameState.playerPos.z);
+    gameState.camera.rotation.order = 'YXZ';
+    gameState.camera.rotation.y = gameState.yaw;
+    gameState.camera.rotation.x = gameState.pitch;
+    return;
+  }
+
+  const forward = new THREE.Vector3(Math.sin(gameState.yaw), 0, -Math.cos(gameState.yaw));
   const right = new THREE.Vector3(-forward.z, 0, forward.x);
   const move = new THREE.Vector3();
 
@@ -841,6 +854,9 @@ const updateCamera = (delta) => {
   }
 
   gameState.camera.position.set(gameState.playerPos.x, gameState.playerPos.y + EYE_HEIGHT, gameState.playerPos.z);
+  gameState.camera.rotation.order = 'YXZ';
+  gameState.camera.rotation.y = gameState.yaw;
+  gameState.camera.rotation.x = gameState.pitch;
 };
 
 const animate = (time = 0) => {
