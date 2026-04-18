@@ -2,9 +2,15 @@ import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
 
 const STORAGE_KEY = 'minecraft_v1_worlds';
 const WORLD_SIZE = 24;
-const MAX_HEIGHT = 8;
 const BLOCK_SIZE = 1;
-const MOVE_SPEED = 7;
+const MOVE_SPEED = 4.6;
+const JUMP_SPEED = 7.2;
+const GRAVITY = 18;
+const PLAYER_HEIGHT = 1.8;
+const PLAYER_RADIUS = 0.3;
+const EYE_HEIGHT = 1.62;
+const MAP_TOP_Y = 6;
+const MAP_DEPTH = 14;
 
 const randomSeed = () => Math.floor(Math.random() * 10 ** 9).toString();
 
@@ -41,6 +47,10 @@ const gameState = {
   currentWorldId: null,
   animationFrame: null,
   lastTime: 0,
+  playerPos: new THREE.Vector3(WORLD_SIZE / 2, MAP_TOP_Y + 1, WORLD_SIZE / 2),
+  velocityY: 0,
+  onGround: false,
+  materials: null,
 };
 
 const normalizeWorld = (world) => ({
@@ -115,9 +125,7 @@ const renderWorlds = () => {
     const li = document.createElement('li');
     li.className = 'world-item';
 
-    if (world.id === selectedWorldId) {
-      li.classList.add('selected');
-    }
+    if (world.id === selectedWorldId) li.classList.add('selected');
 
     li.addEventListener('click', () => {
       selectedWorldId = world.id;
@@ -172,43 +180,99 @@ const openSeedDialog = () => {
   createWorld((manualSeed || '').trim() || randomSeed());
 };
 
-const stringHash = (text) => {
-  let h = 2166136261;
-  for (let i = 0; i < text.length; i += 1) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 16777619);
+const keyFromPos = (x, y, z) => `${x},${y},${z}`;
+
+const makeNoiseTexture = (baseHex, variance = 20, size = 16) => {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const base = new THREE.Color(baseHex);
+
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const jitter = (Math.random() * 2 - 1) * (variance / 255);
+      const color = new THREE.Color(
+        Math.min(1, Math.max(0, base.r + jitter)),
+        Math.min(1, Math.max(0, base.g + jitter)),
+        Math.min(1, Math.max(0, base.b + jitter)),
+      );
+      ctx.fillStyle = `#${color.getHexString()}`;
+      ctx.fillRect(x, y, 1, 1);
+    }
   }
-  return h >>> 0;
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  return texture;
 };
 
-const makeRng = (seedText) => {
-  let state = stringHash(seedText);
-  return () => {
-    state += 0x6d2b79f5;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+const makeGrassSideTexture = () => {
+  const size = 16;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  for (let y = 0; y < size; y += 1) {
+    const isTop = y < 5;
+    for (let x = 0; x < size; x += 1) {
+      const base = isTop ? new THREE.Color('#4e8a3a') : new THREE.Color('#8b5a2b');
+      const jitter = (Math.random() * 2 - 1) * 0.08;
+      const color = new THREE.Color(
+        Math.min(1, Math.max(0, base.r + jitter)),
+        Math.min(1, Math.max(0, base.g + jitter)),
+        Math.min(1, Math.max(0, base.b + jitter)),
+      );
+      ctx.fillStyle = `#${color.getHexString()}`;
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  return texture;
+};
+
+const ensureMaterials = () => {
+  if (gameState.materials) return;
+
+  const grassTop = makeNoiseTexture('#4e8a3a', 18);
+  const grassSide = makeGrassSideTexture();
+  const dirt = makeNoiseTexture('#8b5a2b', 20);
+  const stone = makeNoiseTexture('#737373', 24);
+
+  gameState.materials = {
+    grass: [
+      new THREE.MeshLambertMaterial({ map: grassSide }),
+      new THREE.MeshLambertMaterial({ map: grassSide }),
+      new THREE.MeshLambertMaterial({ map: grassTop }),
+      new THREE.MeshLambertMaterial({ map: dirt }),
+      new THREE.MeshLambertMaterial({ map: grassSide }),
+      new THREE.MeshLambertMaterial({ map: grassSide }),
+    ],
+    dirt: new THREE.MeshLambertMaterial({ map: dirt }),
+    stone: new THREE.MeshLambertMaterial({ map: stone }),
   };
 };
-
-const keyFromPos = (x, y, z) => `${x},${y},${z}`;
 
 const ensureEngine = () => {
   if (gameState.renderer) return;
 
-  gameState.renderer = new THREE.WebGLRenderer({ canvas: gameCanvas, antialias: true });
+  gameState.renderer = new THREE.WebGLRenderer({ canvas: gameCanvas, antialias: false });
   gameState.renderer.setPixelRatio(window.devicePixelRatio);
   gameState.scene = new THREE.Scene();
   gameState.scene.background = new THREE.Color('#8cc6ff');
 
   gameState.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 200);
-  gameState.camera.position.set(WORLD_SIZE / 2, MAX_HEIGHT + 2, WORLD_SIZE / 2);
-
   gameState.raycaster = new THREE.Raycaster();
 
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x667777, 0.9);
-  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  ensureMaterials();
+
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x667777, 0.95);
+  const sun = new THREE.DirectionalLight(0xffffff, 0.8);
   sun.position.set(20, 40, 20);
   gameState.scene.add(hemi, sun);
 
@@ -230,7 +294,7 @@ const ensureEngine = () => {
     if (document.pointerLockElement !== gameCanvas) return;
     gameState.yaw -= event.movementX * 0.002;
     gameState.pitch -= event.movementY * 0.002;
-    gameState.pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, gameState.pitch));
+    gameState.pitch = Math.max(-Math.PI / 2 + 0.03, Math.min(Math.PI / 2 - 0.03, gameState.pitch));
   });
 
   gameCanvas.addEventListener('click', () => {
@@ -249,7 +313,6 @@ const clearBlocks = () => {
   gameState.blocks.forEach((mesh) => {
     gameState.scene.remove(mesh);
     mesh.geometry.dispose();
-    mesh.material.dispose();
   });
   gameState.blocks.clear();
 };
@@ -264,34 +327,76 @@ const createBlock = (x, y, z, material) => {
 
 const generateTerrain = (world) => {
   clearBlocks();
-  const rng = makeRng(world.seed);
   const removed = new Set(world.removedBlocks);
-
-  const grass = new THREE.MeshLambertMaterial({ color: '#4e8a3a' });
-  const dirt = new THREE.MeshLambertMaterial({ color: '#8b5a2b' });
-  const stone = new THREE.MeshLambertMaterial({ color: '#737373' });
 
   for (let x = 0; x < WORLD_SIZE; x += 1) {
     for (let z = 0; z < WORLD_SIZE; z += 1) {
-      const columnHeight = 2 + Math.floor(rng() * MAX_HEIGHT);
-      for (let y = 0; y <= columnHeight; y += 1) {
+      for (let y = MAP_TOP_Y; y >= MAP_TOP_Y - MAP_DEPTH; y -= 1) {
         const key = keyFromPos(x, y, z);
         if (removed.has(key)) continue;
 
-        if (y === columnHeight) {
-          createBlock(x, y, z, grass);
-        } else if (y < 2) {
-          createBlock(x, y, z, stone);
+        if (y === MAP_TOP_Y) {
+          createBlock(x, y, z, gameState.materials.grass);
+        } else if (y >= MAP_TOP_Y - 3) {
+          createBlock(x, y, z, gameState.materials.dirt);
         } else {
-          createBlock(x, y, z, dirt);
+          createBlock(x, y, z, gameState.materials.stone);
         }
       }
     }
   }
 
-  gameState.camera.position.set(WORLD_SIZE / 2, MAX_HEIGHT + 4, WORLD_SIZE / 2);
+  gameState.playerPos.set(WORLD_SIZE / 2, MAP_TOP_Y + 1.05, WORLD_SIZE / 2);
+  gameState.velocityY = 0;
+  gameState.onGround = false;
   gameState.yaw = 0;
-  gameState.pitch = -0.15;
+  gameState.pitch = -0.1;
+};
+
+const overlapsSolid = (position) => {
+  const minX = Math.floor(position.x - PLAYER_RADIUS);
+  const maxX = Math.floor(position.x + PLAYER_RADIUS);
+  const minY = Math.floor(position.y);
+  const maxY = Math.floor(position.y + PLAYER_HEIGHT);
+  const minZ = Math.floor(position.z - PLAYER_RADIUS);
+  const maxZ = Math.floor(position.z + PLAYER_RADIUS);
+
+  for (let x = minX; x <= maxX; x += 1) {
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let z = minZ; z <= maxZ; z += 1) {
+        if (gameState.blocks.has(keyFromPos(x, y, z))) return true;
+      }
+    }
+  }
+
+  return false;
+};
+
+const moveWithCollisions = (dx, dy, dz) => {
+  const next = gameState.playerPos.clone();
+  gameState.onGround = false;
+
+  next.x += dx;
+  if (!overlapsSolid(next)) {
+    gameState.playerPos.x = next.x;
+  }
+
+  next.copy(gameState.playerPos);
+  next.z += dz;
+  if (!overlapsSolid(next)) {
+    gameState.playerPos.z = next.z;
+  }
+
+  next.copy(gameState.playerPos);
+  next.y += dy;
+  if (!overlapsSolid(next)) {
+    gameState.playerPos.y = next.y;
+  } else if (dy < 0) {
+    gameState.velocityY = 0;
+    gameState.onGround = true;
+  } else if (dy > 0) {
+    gameState.velocityY = 0;
+  }
 };
 
 const mineBlock = () => {
@@ -304,19 +409,16 @@ const mineBlock = () => {
   gameState.raycaster.setFromCamera(new THREE.Vector2(0, 0), gameState.camera);
   const blockMeshes = [...gameState.blocks.values()];
   const hits = gameState.raycaster.intersectObjects(blockMeshes, false);
-  if (hits.length === 0) return;
+  if (hits.length === 0 || hits[0].distance > 6) return;
 
   const target = hits[0].object;
   const x = Math.floor(target.position.x);
   const y = Math.floor(target.position.y);
   const z = Math.floor(target.position.z);
 
-  if (y <= 0) return;
-
   const key = keyFromPos(x, y, z);
   gameState.scene.remove(target);
   target.geometry.dispose();
-  target.material.dispose();
   gameState.blocks.delete(key);
 
   updateWorld(gameState.currentWorldId, (world) => {
@@ -335,14 +437,27 @@ const updateCamera = (delta) => {
   if (gameState.keys.has('KeyS')) move.sub(forward);
   if (gameState.keys.has('KeyD')) move.add(right);
   if (gameState.keys.has('KeyA')) move.sub(right);
-  if (gameState.keys.has('Space')) move.y += 1;
-  if (gameState.keys.has('ShiftLeft') || gameState.keys.has('ShiftRight')) move.y -= 1;
 
   if (move.lengthSq() > 0) {
     move.normalize().multiplyScalar(MOVE_SPEED * delta);
-    gameState.camera.position.add(move);
   }
 
+  if (gameState.keys.has('Space') && gameState.onGround) {
+    gameState.velocityY = JUMP_SPEED;
+    gameState.onGround = false;
+  }
+
+  gameState.velocityY -= GRAVITY * delta;
+  const dy = gameState.velocityY * delta;
+
+  moveWithCollisions(move.x, dy, move.z);
+
+  if (gameState.playerPos.y < MAP_TOP_Y - MAP_DEPTH + 1) {
+    gameState.playerPos.y = MAP_TOP_Y + 2;
+    gameState.velocityY = 0;
+  }
+
+  gameState.camera.position.set(gameState.playerPos.x, gameState.playerPos.y + EYE_HEIGHT, gameState.playerPos.z);
   gameState.camera.rotation.order = 'YXZ';
   gameState.camera.rotation.y = gameState.yaw;
   gameState.camera.rotation.x = gameState.pitch;
