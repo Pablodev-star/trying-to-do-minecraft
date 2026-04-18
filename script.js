@@ -582,12 +582,12 @@ const updateMining = (delta) => {
 };
 
 const updateCamera = (delta) => {
-  const forward = new THREE.Vector3(Math.sin(gameState.yaw), 0, Math.cos(gameState.yaw));
+  const forward = new THREE.Vector3(Math.sin(gameState.yaw), 0, -Math.cos(gameState.yaw));
   const right = new THREE.Vector3(forward.z, 0, -forward.x);
   const move = new THREE.Vector3();
 
-  if (gameState.keys.has('KeyW')) move.sub(forward);
-  if (gameState.keys.has('KeyS')) move.add(forward);
+  if (gameState.keys.has('KeyW')) move.add(forward);
+  if (gameState.keys.has('KeyS')) move.sub(forward);
   if (gameState.keys.has('KeyD')) move.add(right);
   if (gameState.keys.has('KeyA')) move.sub(right);
 
