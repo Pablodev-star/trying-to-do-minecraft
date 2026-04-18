@@ -25,6 +25,7 @@
         <ul id="world-list" class="world-list" aria-live="polite"></ul>
 
         <div class="menu-buttons">
+          <button type="button" id="btn-open-world" class="menu-btn" disabled>Abrir mundo</button>
           <button type="button" id="btn-new-world" class="menu-btn">Nuevo mundo</button>
           <button type="button" id="btn-back" class="menu-btn">Volver</button>
         </div>
@@ -47,6 +48,13 @@
       </dialog>
     </main>
 
-    <script src="script.js"></script>
+    <section id="game-view" class="hidden" aria-label="Vista del mapa">
+      <canvas id="game-canvas"></canvas>
+      <div id="crosshair">+</div>
+      <div id="hud">WASD mover · Espacio/Subir · Shift/Bajar · Click izquierdo picar</div>
+      <button type="button" id="btn-exit-world" class="menu-btn hud-button">Salir al menú</button>
+    </section>
+
+    <script type="module" src="script.js"></script>
   </body>
 </html>

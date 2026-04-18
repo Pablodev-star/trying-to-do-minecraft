@@ -40,8 +40,8 @@ body {
   text-align: center;
 }
 
-.panel.hidden {
-  display: none;
+.hidden {
+  display: none !important;
 }
 
 .game-title,
@@ -90,6 +90,15 @@ body {
   text-align: left;
 }
 
+.world-item {
+  cursor: pointer;
+}
+
+.world-item.selected {
+  border-color: #f6e8a3;
+  background: rgba(255, 222, 122, 0.18);
+}
+
 .world-item small {
   display: block;
   opacity: 0.8;
@@ -108,11 +117,16 @@ body {
   cursor: pointer;
 }
 
-.menu-btn:hover {
+.menu-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.menu-btn:hover:not(:disabled) {
   filter: brightness(1.1);
 }
 
-.menu-btn:active {
+.menu-btn:active:not(:disabled) {
   transform: translateY(1px);
   filter: brightness(0.95);
 }
@@ -143,4 +157,45 @@ body {
   border: 2px solid #2e2e2e;
   background: #e2e2e2;
   color: #111;
+}
+
+#game-view {
+  position: fixed;
+  inset: 0;
+  background: #8cc6ff;
+}
+
+#game-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#crosshair {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 1.6rem;
+  color: #fff;
+  text-shadow: 0 0 4px #000;
+  pointer-events: none;
+}
+
+#hud {
+  position: fixed;
+  left: 50%;
+  bottom: 1rem;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.45);
+  padding: 0.4rem 0.8rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 0.9rem;
+}
+
+.hud-button {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  width: auto;
 }
