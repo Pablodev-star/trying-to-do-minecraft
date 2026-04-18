@@ -233,7 +233,8 @@ const addItemToInventory = (type, count = 1) => {
   return remaining === 0;
 };
 
-const renderSlots = (container, from, to, selectedIndexOffset = null) => {
+const renderSlots = (container, from, to, options = {}) => {
+  const { selectedIndexOffset = null, mode = 'inventory' } = options;
   container.innerHTML = '';
   for (let i = from; i < to; i += 1) {
     const slot = document.createElement('button');
@@ -245,17 +246,34 @@ const renderSlots = (container, from, to, selectedIndexOffset = null) => {
     slot.innerHTML = item
       ? `${BLOCK_SYMBOL[item.type] ?? '□'}<span class="slot-count">${item.count}</span>`
       : '';
+    slot.addEventListener('click', () => {
+      if (mode === 'hotbar' && !gameState.inventoryOpen) {
+        gameState.selectedHotbar = i;
+        renderInventory();
+        return;
+      }
+      if (!gameState.inventoryOpen) return;
+      handleSlotClick(i);
+    });
     slot.addEventListener('click', () => handleSlotClick(i));
     container.append(slot);
   }
 };
 
 const renderHotbar = () => {
+  renderSlots(hotbarEl, 0, 9, { selectedIndexOffset: gameState.selectedHotbar, mode: 'hotbar' });
   renderSlots(hotbarEl, 0, 9, gameState.selectedHotbar);
 };
 
 const renderInventory = () => {
   renderHotbar();
+  renderSlots(inventoryGrid, 0, 36, {
+    selectedIndexOffset: gameState.inventoryOpen ? gameState.selectedHotbar : null,
+    mode: 'inventory',
+  });
+  inventoryPanel.dataset.carrying = gameState.carriedItem
+    ? `Llevando: ${gameState.carriedItem.type} x${gameState.carriedItem.count}`
+    : 'Llevando: vacío';
   renderSlots(inventoryGrid, 0, 36, gameState.inventoryOpen ? gameState.selectedHotbar : null);
 };
 
@@ -679,6 +697,8 @@ const breakBlock = (blockHit) => {
   if (Array.isArray(target.material)) target.material.forEach((mat) => mat.dispose());
   else target.material.dispose();
   gameState.blocks.delete(key);
+  const dropType = type === 'grass' ? 'dirt' : type === 'dirt' ? 'dirt' : null;
+  if (dropType) addItemToInventory(dropType, 1);
   addItemToInventory(type, 1);
 
   updateWorld(gameState.currentWorldId, (world) => {
@@ -781,6 +801,22 @@ const placeSelectedBlock = () => {
 };
 
 const updateCamera = (delta) => {
+  gameState.camera.rotation.order = 'YXZ';
+  gameState.camera.rotation.y = gameState.yaw;
+  gameState.camera.rotation.x = gameState.pitch;
+
+  if (gameState.inventoryOpen) {
+    gameState.camera.position.set(gameState.playerPos.x, gameState.playerPos.y + EYE_HEIGHT, gameState.playerPos.z);
+    return;
+  }
+
+  const forward = new THREE.Vector3();
+  gameState.camera.getWorldDirection(forward);
+  forward.y = 0;
+  if (forward.lengthSq() < 0.0001) {
+    forward.set(Math.sin(gameState.yaw), 0, -Math.cos(gameState.yaw));
+  }
+  forward.normalize();
   if (gameState.inventoryOpen) {
     gameState.camera.position.set(gameState.playerPos.x, gameState.playerPos.y + EYE_HEIGHT, gameState.playerPos.z);
     gameState.camera.rotation.order = 'YXZ';

@@ -219,6 +219,15 @@ body {
   text-align: center;
 }
 
+.inventory-panel::after {
+  content: attr(data-carrying);
+  display: block;
+  margin-top: 0.6rem;
+  text-align: center;
+  font-size: 0.85rem;
+  opacity: 0.9;
+}
+
 .inventory-grid {
   display: grid;
   grid-template-columns: repeat(9, 44px);
