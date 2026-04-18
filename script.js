@@ -15,13 +15,21 @@ const seedInput = document.querySelector('#seed-input');
 
 let customSeedEnabled = false;
 
+const normalizeWorld = (world) => ({
+  id: typeof world.id === 'string' ? world.id : `world-${Date.now()}`,
+  name: typeof world.name === 'string' && world.name.trim() ? world.name : 'Mundo sin nombre',
+  seed: typeof world.seed === 'string' && world.seed.trim() ? world.seed : randomSeed(),
+  createdAt: typeof world.createdAt === 'string' ? world.createdAt : new Date().toISOString(),
+});
+
 const loadWorlds = () => {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return [];
 
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeWorld);
   } catch {
     return [];
   }
@@ -37,7 +45,7 @@ const createWorld = (seed) => {
   const worlds = loadWorlds();
   const worldNumber = worlds.length + 1;
   const world = {
-    id: `world-${Date.now()}`,
+    id: `world-${Date.now()}-${Math.floor(Math.random() * 9999)}`,
     name: `Mundo ${worldNumber}`,
     seed,
     createdAt: new Date().toISOString(),
@@ -46,6 +54,11 @@ const createWorld = (seed) => {
   worlds.unshift(world);
   saveWorlds(worlds);
   renderWorlds();
+};
+
+const formatDate = (iso) => {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? 'Fecha desconocida' : date.toLocaleDateString('es-ES');
 };
 
 const renderWorlds = () => {
@@ -63,7 +76,17 @@ const renderWorlds = () => {
   worlds.forEach((world) => {
     const li = document.createElement('li');
     li.className = 'world-item';
-    li.innerHTML = `${world.name}<small>Seed: ${world.seed}</small>`;
+
+    const title = document.createElement('strong');
+    title.textContent = world.name;
+
+    const seed = document.createElement('small');
+    seed.textContent = `Seed: ${world.seed}`;
+
+    const created = document.createElement('small');
+    created.textContent = `Creado: ${formatDate(world.createdAt)}`;
+
+    li.append(title, seed, created);
     worldList.append(li);
   });
 };
@@ -83,7 +106,20 @@ const openSeedDialog = () => {
   customSeedEnabled = false;
   seedInput.value = '';
   seedInput.disabled = true;
-  seedDialog.showModal();
+
+  if (typeof seedDialog.showModal === 'function') {
+    seedDialog.showModal();
+    return;
+  }
+
+  const useCustom = window.confirm('¿Quieres elegir una seed personalizada? (Cancelar = aleatoria)');
+  if (!useCustom) {
+    createWorld(randomSeed());
+    return;
+  }
+
+  const manualSeed = window.prompt('Escribe la seed (si la dejas vacía se genera una aleatoria):', '');
+  createWorld((manualSeed || '').trim() || randomSeed());
 };
 
 btnSolo.addEventListener('click', showWorldsMenu);
