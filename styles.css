@@ -193,6 +193,62 @@ body {
   font-size: 0.9rem;
 }
 
+.hotbar {
+  position: fixed;
+  left: 50%;
+  bottom: 3.2rem;
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: repeat(9, 44px);
+  gap: 4px;
+}
+
+.inventory-panel {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(27, 27, 27, 0.92);
+  border: 2px solid #aaa;
+  padding: 0.9rem;
+  min-width: 460px;
+}
+
+.inventory-panel h3 {
+  margin: 0 0 0.6rem;
+  text-align: center;
+}
+
+.inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(9, 44px);
+  gap: 4px;
+}
+
+.slot {
+  width: 44px;
+  height: 44px;
+  border: 2px solid #5b5b5b;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  position: relative;
+  user-select: none;
+  cursor: pointer;
+}
+
+.slot.selected {
+  border-color: #f0e58a;
+}
+
+.slot-count {
+  position: absolute;
+  right: 3px;
+  bottom: 1px;
+  font-size: 0.78rem;
+}
+
 .hud-button {
   position: fixed;
   top: 1rem;

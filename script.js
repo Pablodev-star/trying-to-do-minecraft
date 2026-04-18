@@ -31,6 +31,9 @@ const menuScreen = document.querySelector('.menu-screen');
 const gameView = document.querySelector('#game-view');
 const gameCanvas = document.querySelector('#game-canvas');
 const btnExitWorld = document.querySelector('#btn-exit-world');
+const hotbarEl = document.querySelector('#hotbar');
+const inventoryPanel = document.querySelector('#inventory-panel');
+const inventoryGrid = document.querySelector('#inventory-grid');
 
 let selectedWorldId = null;
 let customSeedEnabled = false;
@@ -59,6 +62,10 @@ const gameState = {
     overlay: null,
     crackTextures: [],
   },
+  inventory: Array.from({ length: 36 }, () => null),
+  selectedHotbar: 0,
+  carriedItem: null,
+  inventoryOpen: false,
 };
 
 const normalizeWorld = (world) => ({
@@ -66,6 +73,7 @@ const normalizeWorld = (world) => ({
   name: typeof world.name === 'string' && world.name.trim() ? world.name : 'Mundo sin nombre',
   seed: typeof world.seed === 'string' && world.seed.trim() ? world.seed : randomSeed(),
   removedBlocks: Array.isArray(world.removedBlocks) ? world.removedBlocks : [],
+  placedBlocks: Array.isArray(world.placedBlocks) ? world.placedBlocks : [],
   createdAt: typeof world.createdAt === 'string' ? world.createdAt : new Date().toISOString(),
 });
 
@@ -102,6 +110,7 @@ const createWorld = (seed) => {
     name: `Mundo ${worldNumber}`,
     seed,
     removedBlocks: [],
+    placedBlocks: [],
     createdAt: new Date().toISOString(),
   };
 
@@ -189,6 +198,103 @@ const openSeedDialog = () => {
 };
 
 const keyFromPos = (x, y, z) => `${x},${y},${z}`;
+const BLOCK_SYMBOL = { grass: '🟩', dirt: '🟫', stone: '⬜' };
+
+const cloneItem = (item) => (item ? { ...item } : null);
+
+const addItemToInventory = (type, count = 1) => {
+  let remaining = count;
+
+  for (let i = 0; i < gameState.inventory.length; i += 1) {
+    const slot = gameState.inventory[i];
+    if (!slot || slot.type !== type || slot.count >= 64) continue;
+    const space = 64 - slot.count;
+    const added = Math.min(space, remaining);
+    slot.count += added;
+    remaining -= added;
+    if (remaining === 0) {
+      renderInventory();
+      return true;
+    }
+  }
+
+  for (let i = 0; i < gameState.inventory.length; i += 1) {
+    if (gameState.inventory[i]) continue;
+    const added = Math.min(64, remaining);
+    gameState.inventory[i] = { type, count: added };
+    remaining -= added;
+    if (remaining === 0) {
+      renderInventory();
+      return true;
+    }
+  }
+
+  renderInventory();
+  return remaining === 0;
+};
+
+const renderSlots = (container, from, to, selectedIndexOffset = null) => {
+  container.innerHTML = '';
+  for (let i = from; i < to; i += 1) {
+    const slot = document.createElement('button');
+    slot.type = 'button';
+    slot.className = 'slot';
+    if (selectedIndexOffset !== null && i - from === selectedIndexOffset) slot.classList.add('selected');
+    const item = gameState.inventory[i];
+    slot.dataset.index = String(i);
+    slot.innerHTML = item
+      ? `${BLOCK_SYMBOL[item.type] ?? '□'}<span class="slot-count">${item.count}</span>`
+      : '';
+    slot.addEventListener('click', () => handleSlotClick(i));
+    container.append(slot);
+  }
+};
+
+const renderHotbar = () => {
+  renderSlots(hotbarEl, 0, 9, gameState.selectedHotbar);
+};
+
+const renderInventory = () => {
+  renderHotbar();
+  renderSlots(inventoryGrid, 0, 36, gameState.inventoryOpen ? gameState.selectedHotbar : null);
+};
+
+const handleSlotClick = (index) => {
+  const target = cloneItem(gameState.inventory[index]);
+  const carried = cloneItem(gameState.carriedItem);
+
+  if (!carried && target) {
+    gameState.carriedItem = target;
+    gameState.inventory[index] = null;
+  } else if (carried && !target) {
+    gameState.inventory[index] = carried;
+    gameState.carriedItem = null;
+  } else if (carried && target && carried.type === target.type && target.count < 64) {
+    const moved = Math.min(64 - target.count, carried.count);
+    target.count += moved;
+    carried.count -= moved;
+    gameState.inventory[index] = target;
+    gameState.carriedItem = carried.count > 0 ? carried : null;
+  } else if (carried && target) {
+    gameState.inventory[index] = carried;
+    gameState.carriedItem = target;
+  }
+
+  renderInventory();
+};
+
+const toggleInventory = () => {
+  gameState.inventoryOpen = !gameState.inventoryOpen;
+  inventoryPanel.classList.toggle('hidden', !gameState.inventoryOpen);
+  if (gameState.inventoryOpen && document.pointerLockElement === gameCanvas) {
+    document.exitPointerLock();
+  }
+  if (gameState.inventoryOpen) {
+    gameState.keys.clear();
+    gameState.mining.active = false;
+  }
+  renderInventory();
+};
 
 const makeNoiseTexture = (baseHex, variance = 20, size = 16) => {
   const canvas = document.createElement('canvas');
@@ -337,6 +443,17 @@ const ensureEngine = () => {
   });
 
   document.addEventListener('keydown', (event) => {
+    if (event.code === 'KeyE' && !event.repeat) {
+      toggleInventory();
+      return;
+    }
+
+    if (/^Digit[1-9]$/.test(event.code)) {
+      gameState.selectedHotbar = Number(event.code.replace('Digit', '')) - 1;
+      renderInventory();
+      return;
+    }
+
     gameState.keys.add(event.code);
   });
 
@@ -356,6 +473,7 @@ const ensureEngine = () => {
   });
 
   gameCanvas.addEventListener('mousedown', (event) => {
+    if (gameState.inventoryOpen) return;
     if (event.button !== 0) return;
     if (document.pointerLockElement !== gameCanvas) {
       gameCanvas.requestPointerLock();
@@ -375,6 +493,13 @@ const ensureEngine = () => {
     if (gameState.mining.overlay) gameState.mining.overlay.visible = false;
   });
 
+  gameCanvas.addEventListener('contextmenu', (event) => event.preventDefault());
+  gameCanvas.addEventListener('mousedown', (event) => {
+    if (event.button !== 2 || gameState.inventoryOpen) return;
+    if (document.pointerLockElement !== gameCanvas) return;
+    placeSelectedBlock();
+  });
+
   gameState.renderer.setSize(window.innerWidth, window.innerHeight);
 };
 
@@ -388,11 +513,13 @@ const clearBlocks = () => {
   gameState.blocks.clear();
 };
 
-const createBlock = (x, y, z, material) => {
+const createBlock = (x, y, z, material, type, placed = false) => {
   const geometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.set(x + 0.5, y + 0.5, z + 0.5);
   mesh.userData.baseMaterial = material;
+  mesh.userData.type = type;
+  mesh.userData.placed = placed;
   gameState.scene.add(mesh);
   gameState.blocks.set(keyFromPos(x, y, z), mesh);
 };
@@ -408,15 +535,24 @@ const generateTerrain = (world) => {
         if (removed.has(key)) continue;
 
         if (y === MAP_TOP_Y) {
-          createBlock(x, y, z, gameState.materials.grass);
+          createBlock(x, y, z, gameState.materials.grass, 'grass');
         } else if (y >= MAP_TOP_Y - 3) {
-          createBlock(x, y, z, gameState.materials.dirt);
+          createBlock(x, y, z, gameState.materials.dirt, 'dirt');
         } else {
-          createBlock(x, y, z, gameState.materials.stone);
+          createBlock(x, y, z, gameState.materials.stone, 'stone');
         }
       }
     }
   }
+
+  world.placedBlocks.forEach((entry) => {
+    const [coord, type] = String(entry).split(':');
+    const [x, y, z] = coord.split(',').map(Number);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
+    if (!type || gameState.blocks.has(keyFromPos(x, y, z))) return;
+    const material = gameState.materials[type] ?? gameState.materials.dirt;
+    createBlock(x, y, z, material, type, true);
+  });
 
   gameState.playerPos.set(WORLD_SIZE / 2, MAP_TOP_Y + 1.05, WORLD_SIZE / 2);
   gameState.velocityY = 0;
@@ -519,25 +655,41 @@ const raycastBlock = () => {
   if (hits.length === 0 || hits[0].distance > 6) return null;
 
   const target = hits[0].object;
+  const worldNormal = hits[0].face.normal.clone().transformDirection(target.matrixWorld).round();
   const x = Math.floor(target.position.x);
   const y = Math.floor(target.position.y);
   const z = Math.floor(target.position.z);
 
-  return { target, key: keyFromPos(x, y, z), x, y, z };
+  return {
+    target,
+    key: keyFromPos(x, y, z),
+    x,
+    y,
+    z,
+    type: target.userData.type,
+    placed: target.userData.placed,
+    faceNormal: worldNormal,
+  };
 };
 
 const breakBlock = (blockHit) => {
-  const { target, key } = blockHit;
+  const { target, key, type, placed } = blockHit;
   gameState.scene.remove(target);
   target.geometry.dispose();
   if (Array.isArray(target.material)) target.material.forEach((mat) => mat.dispose());
   else target.material.dispose();
   gameState.blocks.delete(key);
+  addItemToInventory(type, 1);
 
   updateWorld(gameState.currentWorldId, (world) => {
-    const next = new Set(world.removedBlocks);
-    next.add(key);
-    return { ...world, removedBlocks: [...next] };
+    const removed = new Set(world.removedBlocks);
+    const placedBlocks = new Set(world.placedBlocks);
+    if (placed) {
+      placedBlocks.delete(`${key}:${type}`);
+    } else {
+      removed.add(key);
+    }
+    return { ...world, removedBlocks: [...removed], placedBlocks: [...placedBlocks] };
   });
 
   refreshBlockLighting();
@@ -581,9 +733,64 @@ const updateMining = (delta) => {
   }
 };
 
+const placeSelectedBlock = () => {
+  const selected = gameState.inventory[gameState.selectedHotbar];
+  if (!selected || selected.count <= 0) return;
+
+  const hit = raycastBlock();
+  if (!hit) return;
+
+  const point = hit.target.position.clone();
+  const placePos = point.clone().add(hit.faceNormal).floor();
+  const key = keyFromPos(placePos.x, placePos.y, placePos.z);
+
+  if (gameState.blocks.has(key)) return;
+  if (placePos.y < MAP_TOP_Y - MAP_DEPTH || placePos.y > MAP_TOP_Y + 20) return;
+
+  const testPos = gameState.playerPos.clone();
+  if (
+    Math.abs(testPos.x - (placePos.x + 0.5)) < PLAYER_RADIUS + 0.5 &&
+    Math.abs(testPos.z - (placePos.z + 0.5)) < PLAYER_RADIUS + 0.5 &&
+    Math.abs(testPos.y + PLAYER_HEIGHT / 2 - (placePos.y + 0.5)) < PLAYER_HEIGHT / 2 + 0.5
+  ) {
+    return;
+  }
+
+  createBlock(
+    placePos.x,
+    placePos.y,
+    placePos.z,
+    gameState.materials[selected.type] ?? gameState.materials.dirt,
+    selected.type,
+    true,
+  );
+
+  selected.count -= 1;
+  if (selected.count <= 0) gameState.inventory[gameState.selectedHotbar] = null;
+
+  updateWorld(gameState.currentWorldId, (world) => {
+    const placedBlocks = new Set(world.placedBlocks);
+    placedBlocks.add(`${key}:${selected.type}`);
+    const removed = new Set(world.removedBlocks);
+    removed.delete(key);
+    return { ...world, placedBlocks: [...placedBlocks], removedBlocks: [...removed] };
+  });
+
+  refreshBlockLighting();
+  renderInventory();
+};
+
 const updateCamera = (delta) => {
+  if (gameState.inventoryOpen) {
+    gameState.camera.position.set(gameState.playerPos.x, gameState.playerPos.y + EYE_HEIGHT, gameState.playerPos.z);
+    gameState.camera.rotation.order = 'YXZ';
+    gameState.camera.rotation.y = gameState.yaw;
+    gameState.camera.rotation.x = gameState.pitch;
+    return;
+  }
+
   const forward = new THREE.Vector3(Math.sin(gameState.yaw), 0, -Math.cos(gameState.yaw));
-  const right = new THREE.Vector3(forward.z, 0, -forward.x);
+  const right = new THREE.Vector3(-forward.z, 0, forward.x);
   const move = new THREE.Vector3();
 
   if (gameState.keys.has('KeyW')) move.add(forward);
@@ -638,6 +845,9 @@ const openWorld = () => {
   gameState.currentWorldId = world.id;
   generateTerrain(world);
   refreshBlockLighting();
+  gameState.inventoryOpen = false;
+  inventoryPanel.classList.add('hidden');
+  renderInventory();
 
   menuScreen.classList.add('hidden');
   gameView.classList.remove('hidden');
@@ -655,6 +865,8 @@ const closeWorld = () => {
 
   gameView.classList.add('hidden');
   menuScreen.classList.remove('hidden');
+  gameState.inventoryOpen = false;
+  inventoryPanel.classList.add('hidden');
   showWorldsMenu();
 };
 
@@ -689,3 +901,5 @@ btnSaveCustom.addEventListener('click', () => {
 btnCancel.addEventListener('click', () => {
   seedDialog.close();
 });
+
+renderInventory();

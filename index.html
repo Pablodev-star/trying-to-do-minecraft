@@ -51,7 +51,12 @@
     <section id="game-view" class="hidden" aria-label="Vista del mapa">
       <canvas id="game-canvas"></canvas>
       <div id="crosshair">+</div>
-      <div id="hud">WASD mover · Espacio saltar · Click izquierdo picar</div>
+      <div id="hud">WASD mover · E inventario · Click izq picar · Click der colocar</div>
+      <div id="hotbar" class="hotbar" aria-label="Barra rápida"></div>
+      <section id="inventory-panel" class="inventory-panel hidden" aria-label="Inventario">
+        <h3>Inventario</h3>
+        <div id="inventory-grid" class="inventory-grid"></div>
+      </section>
       <button type="button" id="btn-exit-world" class="menu-btn hud-button">Salir al menú</button>
     </section>
 
