@@ -51,6 +51,14 @@ const gameState = {
   velocityY: 0,
   onGround: false,
   materials: null,
+  mining: {
+    active: false,
+    targetKey: null,
+    progress: 0,
+    duration: 0.75,
+    overlay: null,
+    crackTextures: [],
+  },
 };
 
 const normalizeWorld = (world) => ({
@@ -258,6 +266,51 @@ const ensureMaterials = () => {
   };
 };
 
+const makeCrackTexture = (step) => {
+  const size = 32;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, size, size);
+  ctx.strokeStyle = 'rgba(20,20,20,0.95)';
+  ctx.lineWidth = 1 + step * 0.12;
+
+  const lines = 6 + step * 3;
+  for (let i = 0; i < lines; i += 1) {
+    const x1 = Math.random() * size;
+    const y1 = Math.random() * size;
+    const x2 = x1 + (Math.random() * 14 - 7);
+    const y2 = y1 + (Math.random() * 14 - 7);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.needsUpdate = true;
+  return texture;
+};
+
+const ensureMiningOverlay = () => {
+  if (gameState.mining.overlay) return;
+
+  gameState.mining.crackTextures = Array.from({ length: 10 }, (_, i) => makeCrackTexture(i));
+  const overlayMaterial = new THREE.MeshBasicMaterial({
+    map: gameState.mining.crackTextures[0],
+    transparent: true,
+    opacity: 0.85,
+    depthWrite: false,
+  });
+  const overlay = new THREE.Mesh(new THREE.BoxGeometry(1.01, 1.01, 1.01), overlayMaterial);
+  overlay.visible = false;
+  gameState.scene.add(overlay);
+  gameState.mining.overlay = overlay;
+};
+
 const ensureEngine = () => {
   if (gameState.renderer) return;
 
@@ -270,6 +323,7 @@ const ensureEngine = () => {
   gameState.raycaster = new THREE.Raycaster();
 
   ensureMaterials();
+  ensureMiningOverlay();
 
   const hemi = new THREE.HemisphereLight(0xffffff, 0x667777, 0.95);
   const sun = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -298,12 +352,27 @@ const ensureEngine = () => {
   });
 
   gameCanvas.addEventListener('click', () => {
+    if (document.pointerLockElement !== gameCanvas) gameCanvas.requestPointerLock();
+  });
+
+  gameCanvas.addEventListener('mousedown', (event) => {
+    if (event.button !== 0) return;
     if (document.pointerLockElement !== gameCanvas) {
       gameCanvas.requestPointerLock();
       return;
     }
 
-    mineBlock();
+    gameState.mining.active = true;
+    gameState.mining.progress = 0;
+    gameState.mining.targetKey = null;
+  });
+
+  document.addEventListener('mouseup', (event) => {
+    if (event.button !== 0) return;
+    gameState.mining.active = false;
+    gameState.mining.targetKey = null;
+    gameState.mining.progress = 0;
+    if (gameState.mining.overlay) gameState.mining.overlay.visible = false;
   });
 
   gameState.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -313,6 +382,8 @@ const clearBlocks = () => {
   gameState.blocks.forEach((mesh) => {
     gameState.scene.remove(mesh);
     mesh.geometry.dispose();
+    if (Array.isArray(mesh.material)) mesh.material.forEach((mat) => mat.dispose());
+    else mesh.material.dispose();
   });
   gameState.blocks.clear();
 };
@@ -321,6 +392,7 @@ const createBlock = (x, y, z, material) => {
   const geometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.set(x + 0.5, y + 0.5, z + 0.5);
+  mesh.userData.baseMaterial = material;
   gameState.scene.add(mesh);
   gameState.blocks.set(keyFromPos(x, y, z), mesh);
 };
@@ -351,6 +423,41 @@ const generateTerrain = (world) => {
   gameState.onGround = false;
   gameState.yaw = 0;
   gameState.pitch = -0.1;
+};
+
+const getSunLight = (x, y, z) => {
+  let blockedAbove = 0;
+  for (let yy = y + 1; yy <= MAP_TOP_Y; yy += 1) {
+    if (gameState.blocks.has(keyFromPos(x, yy, z))) blockedAbove += 1;
+  }
+
+  const depth = MAP_TOP_Y - y;
+  const sunFactor = Math.max(0.2, 1 - blockedAbove * 0.24 - depth * 0.05);
+  return Math.max(0.18, Math.min(1, sunFactor));
+};
+
+const refreshBlockLighting = () => {
+  const applyLight = (baseMaterial, light) => {
+    if (Array.isArray(baseMaterial)) {
+      return baseMaterial.map((mat) => {
+        const next = mat.clone();
+        next.color.setScalar(light);
+        return next;
+      });
+    }
+
+    const next = baseMaterial.clone();
+    next.color.setScalar(light);
+    return next;
+  };
+
+  gameState.blocks.forEach((mesh, key) => {
+    const [x, y, z] = key.split(',').map(Number);
+    const light = getSunLight(x, y, z);
+    if (Array.isArray(mesh.material)) mesh.material.forEach((mat) => mat.dispose());
+    else mesh.material.dispose();
+    mesh.material = applyLight(mesh.userData.baseMaterial, light);
+  });
 };
 
 const overlapsSolid = (position) => {
@@ -399,8 +506,8 @@ const moveWithCollisions = (dx, dy, dz) => {
   }
 };
 
-const mineBlock = () => {
-  if (!gameState.currentWorldId) return;
+const raycastBlock = () => {
+  if (!gameState.currentWorldId) return null;
 
   gameState.camera.rotation.order = 'YXZ';
   gameState.camera.rotation.y = gameState.yaw;
@@ -409,16 +516,22 @@ const mineBlock = () => {
   gameState.raycaster.setFromCamera(new THREE.Vector2(0, 0), gameState.camera);
   const blockMeshes = [...gameState.blocks.values()];
   const hits = gameState.raycaster.intersectObjects(blockMeshes, false);
-  if (hits.length === 0 || hits[0].distance > 6) return;
+  if (hits.length === 0 || hits[0].distance > 6) return null;
 
   const target = hits[0].object;
   const x = Math.floor(target.position.x);
   const y = Math.floor(target.position.y);
   const z = Math.floor(target.position.z);
 
-  const key = keyFromPos(x, y, z);
+  return { target, key: keyFromPos(x, y, z), x, y, z };
+};
+
+const breakBlock = (blockHit) => {
+  const { target, key } = blockHit;
   gameState.scene.remove(target);
   target.geometry.dispose();
+  if (Array.isArray(target.material)) target.material.forEach((mat) => mat.dispose());
+  else target.material.dispose();
   gameState.blocks.delete(key);
 
   updateWorld(gameState.currentWorldId, (world) => {
@@ -426,6 +539,46 @@ const mineBlock = () => {
     next.add(key);
     return { ...world, removedBlocks: [...next] };
   });
+
+  refreshBlockLighting();
+};
+
+const updateMining = (delta) => {
+  const overlay = gameState.mining.overlay;
+  if (!overlay) return;
+
+  if (!gameState.mining.active) {
+    overlay.visible = false;
+    return;
+  }
+
+  const hit = raycastBlock();
+  if (!hit) {
+    gameState.mining.progress = 0;
+    gameState.mining.targetKey = null;
+    overlay.visible = false;
+    return;
+  }
+
+  if (gameState.mining.targetKey !== hit.key) {
+    gameState.mining.targetKey = hit.key;
+    gameState.mining.progress = 0;
+  } else {
+    gameState.mining.progress += delta / gameState.mining.duration;
+  }
+
+  const step = Math.min(9, Math.floor(gameState.mining.progress * 10));
+  overlay.material.map = gameState.mining.crackTextures[step];
+  overlay.material.needsUpdate = true;
+  overlay.position.copy(hit.target.position);
+  overlay.visible = true;
+
+  if (gameState.mining.progress >= 1) {
+    breakBlock(hit);
+    gameState.mining.progress = 0;
+    gameState.mining.targetKey = null;
+    overlay.visible = false;
+  }
 };
 
 const updateCamera = (delta) => {
@@ -433,8 +586,8 @@ const updateCamera = (delta) => {
   const right = new THREE.Vector3(forward.z, 0, -forward.x);
   const move = new THREE.Vector3();
 
-  if (gameState.keys.has('KeyW')) move.add(forward);
-  if (gameState.keys.has('KeyS')) move.sub(forward);
+  if (gameState.keys.has('KeyW')) move.sub(forward);
+  if (gameState.keys.has('KeyS')) move.add(forward);
   if (gameState.keys.has('KeyD')) move.add(right);
   if (gameState.keys.has('KeyA')) move.sub(right);
 
@@ -470,6 +623,7 @@ const animate = (time = 0) => {
   gameState.lastTime = time;
 
   updateCamera(delta);
+  updateMining(delta);
   gameState.renderer.render(gameState.scene, gameState.camera);
   gameState.animationFrame = requestAnimationFrame(animate);
 };
@@ -483,6 +637,7 @@ const openWorld = () => {
   ensureEngine();
   gameState.currentWorldId = world.id;
   generateTerrain(world);
+  refreshBlockLighting();
 
   menuScreen.classList.add('hidden');
   gameView.classList.remove('hidden');
