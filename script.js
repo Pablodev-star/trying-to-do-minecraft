@@ -1,7 +1,8 @@
 import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
 
 const STORAGE_KEY = 'minecraft_v1_worlds';
-const WORLD_SIZE = 24;
+const WORLD_SIZE_X = 48;
+const WORLD_SIZE_Z = 48;
 const BLOCK_SIZE = 1;
 const MOVE_SPEED = 4.6;
 const JUMP_SPEED = 7.2;
@@ -9,6 +10,9 @@ const GRAVITY = 18;
 const PLAYER_HEIGHT = 1.8;
 const PLAYER_RADIUS = 0.3;
 const EYE_HEIGHT = 1.62;
+const WORLD_MIN_Y = -64;
+const WORLD_MAX_Y = 319;
+const SURFACE_Y = 63;
 const MAP_TOP_Y = 6;
 const MAP_DEPTH = 14;
 
@@ -50,6 +54,7 @@ const gameState = {
   currentWorldId: null,
   animationFrame: null,
   lastTime: 0,
+  playerPos: new THREE.Vector3(WORLD_SIZE_X / 2, SURFACE_Y + 1, WORLD_SIZE_Z / 2),
   playerPos: new THREE.Vector3(WORLD_SIZE / 2, MAP_TOP_Y + 1, WORLD_SIZE / 2),
   velocityY: 0,
   onGround: false,
@@ -234,6 +239,7 @@ const addItemToInventory = (type, count = 1) => {
 };
 
 const renderSlots = (container, from, to, options = {}) => {
+  if (!container) return;
   const { selectedIndexOffset = null, mode = 'inventory' } = options;
   container.innerHTML = '';
   for (let i = from; i < to; i += 1) {
@@ -262,6 +268,10 @@ const renderSlots = (container, from, to, options = {}) => {
 
 const renderHotbar = () => {
   renderSlots(hotbarEl, 0, 9, { selectedIndexOffset: gameState.selectedHotbar, mode: 'hotbar' });
+};
+
+const renderInventory = () => {
+  if (!inventoryPanel) return;
   renderSlots(hotbarEl, 0, 9, gameState.selectedHotbar);
 };
 
@@ -546,6 +556,15 @@ const generateTerrain = (world) => {
   clearBlocks();
   const removed = new Set(world.removedBlocks);
 
+  for (let x = 0; x < WORLD_SIZE_X; x += 1) {
+    for (let z = 0; z < WORLD_SIZE_Z; z += 1) {
+      for (let y = SURFACE_Y; y >= WORLD_MIN_Y; y -= 1) {
+        const key = keyFromPos(x, y, z);
+        if (removed.has(key)) continue;
+
+        if (y === SURFACE_Y) {
+          createBlock(x, y, z, gameState.materials.grass, 'grass');
+        } else if (y >= SURFACE_Y - 3) {
   for (let x = 0; x < WORLD_SIZE; x += 1) {
     for (let z = 0; z < WORLD_SIZE; z += 1) {
       for (let y = MAP_TOP_Y; y >= MAP_TOP_Y - MAP_DEPTH; y -= 1) {
@@ -572,6 +591,7 @@ const generateTerrain = (world) => {
     createBlock(x, y, z, material, type, true);
   });
 
+  gameState.playerPos.set(WORLD_SIZE_X / 2, SURFACE_Y + 1.05, WORLD_SIZE_Z / 2);
   gameState.playerPos.set(WORLD_SIZE / 2, MAP_TOP_Y + 1.05, WORLD_SIZE / 2);
   gameState.velocityY = 0;
   gameState.onGround = false;
@@ -581,6 +601,11 @@ const generateTerrain = (world) => {
 
 const getSunLight = (x, y, z) => {
   let blockedAbove = 0;
+  for (let yy = y + 1; yy <= SURFACE_Y; yy += 1) {
+    if (gameState.blocks.has(keyFromPos(x, yy, z))) blockedAbove += 1;
+  }
+
+  const depth = SURFACE_Y - y;
   for (let yy = y + 1; yy <= MAP_TOP_Y; yy += 1) {
     if (gameState.blocks.has(keyFromPos(x, yy, z))) blockedAbove += 1;
   }
@@ -765,6 +790,7 @@ const placeSelectedBlock = () => {
   const key = keyFromPos(placePos.x, placePos.y, placePos.z);
 
   if (gameState.blocks.has(key)) return;
+  if (placePos.y < WORLD_MIN_Y || placePos.y > WORLD_MAX_Y) return;
   if (placePos.y < MAP_TOP_Y - MAP_DEPTH || placePos.y > MAP_TOP_Y + 20) return;
 
   const testPos = gameState.playerPos.clone();
@@ -848,6 +874,8 @@ const updateCamera = (delta) => {
 
   moveWithCollisions(move.x, dy, move.z);
 
+  if (gameState.playerPos.y < WORLD_MIN_Y + 1) {
+    gameState.playerPos.y = SURFACE_Y + 2;
   if (gameState.playerPos.y < MAP_TOP_Y - MAP_DEPTH + 1) {
     gameState.playerPos.y = MAP_TOP_Y + 2;
     gameState.velocityY = 0;
@@ -906,6 +934,51 @@ const closeWorld = () => {
   showWorldsMenu();
 };
 
+if (
+  btnSolo &&
+  btnBack &&
+  btnOpenWorld &&
+  btnNewWorld &&
+  btnExitWorld &&
+  btnRandomSeed &&
+  btnCustomSeed &&
+  btnSaveCustom &&
+  btnCancel &&
+  seedDialog &&
+  seedInput
+) {
+  btnSolo.addEventListener('click', showWorldsMenu);
+  btnBack.addEventListener('click', showMainMenu);
+  btnOpenWorld.addEventListener('click', openWorld);
+  btnNewWorld.addEventListener('click', openSeedDialog);
+  btnExitWorld.addEventListener('click', closeWorld);
+
+  btnRandomSeed.addEventListener('click', () => {
+    createWorld(randomSeed());
+    seedDialog.close();
+  });
+
+  btnCustomSeed.addEventListener('click', () => {
+    customSeedEnabled = true;
+    seedInput.disabled = false;
+    seedInput.focus();
+  });
+
+  btnSaveCustom.addEventListener('click', () => {
+    if (!customSeedEnabled) {
+      alert('Primero selecciona "Elegir seed" o usa la opción "Aleatoria".');
+      return;
+    }
+
+    const value = seedInput.value.trim();
+    createWorld(value || randomSeed());
+    seedDialog.close();
+  });
+
+  btnCancel.addEventListener('click', () => {
+    seedDialog.close();
+  });
+}
 btnSolo.addEventListener('click', showWorldsMenu);
 btnBack.addEventListener('click', showMainMenu);
 btnOpenWorld.addEventListener('click', openWorld);
