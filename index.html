@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Minecraft v1 - Inicio</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="menu-screen" aria-live="polite">
+      <section id="main-menu" class="panel" aria-label="Menú principal">
+        <h1 class="game-title">MINECRAFT</h1>
+        <p class="subtitle">Versión 1 (prototipo)</p>
+
+        <nav class="menu-buttons" aria-label="Opciones principales">
+          <button type="button" id="btn-solo" class="menu-btn">Solitario</button>
+          <button type="button" class="menu-btn">Multijugador</button>
+          <button type="button" class="menu-btn">Opciones...</button>
+          <button type="button" class="menu-btn">Salir del juego</button>
+        </nav>
+      </section>
+
+      <section id="worlds-menu" class="panel hidden" aria-label="Tus mundos">
+        <h2 class="section-title">Tus mundos</h2>
+        <ul id="world-list" class="world-list" aria-live="polite"></ul>
+
+        <div class="menu-buttons">
+          <button type="button" id="btn-open-world" class="menu-btn" disabled>Abrir mundo</button>
+          <button type="button" id="btn-new-world" class="menu-btn">Nuevo mundo</button>
+          <button type="button" id="btn-back" class="menu-btn">Volver</button>
+        </div>
+      </section>
+
+      <dialog id="seed-dialog" class="seed-dialog">
+        <form id="seed-form" method="dialog" class="seed-form">
+          <p class="seed-question">¿Quieres elegir una seed o usar una aleatoria?</p>
+          <div class="seed-actions">
+            <button type="button" id="btn-random-seed" class="menu-btn">Aleatoria</button>
+            <button type="button" id="btn-custom-seed" class="menu-btn">Elegir seed</button>
+          </div>
+          <label for="seed-input" class="seed-label">Seed personalizada (opcional)</label>
+          <input id="seed-input" name="seed" type="text" maxlength="40" placeholder="Ej: montanas123" />
+          <div class="seed-actions">
+            <button type="button" id="btn-save-custom" class="menu-btn">Guardar mundo</button>
+            <button type="button" id="btn-cancel" class="menu-btn">Cancelar</button>
+          </div>
+        </form>
+      </dialog>
+    </main>
+
+    <section id="game-view" class="hidden" aria-label="Vista del mapa">
+      <canvas id="game-canvas"></canvas>
+      <div id="crosshair">+</div>
+      <div id="hud">WASD mover · E inventario · Click izq picar · Click der colocar</div>
+      <div id="hotbar" class="hotbar" aria-label="Barra rápida"></div>
+      <section id="inventory-panel" class="inventory-panel hidden" aria-label="Inventario">
+        <h3>Inventario</h3>
+        <div id="inventory-grid" class="inventory-grid"></div>
+      </section>
+      <button type="button" id="btn-exit-world" class="menu-btn hud-button">Salir al menú</button>
+    </section>
+
+    <script type="module" src="script.js"></script>
+    <script>
+      // Fallback mínimo de navegación de menú por si el módulo principal no llega a cargar.
+      (() => {
+        const STORAGE_KEY = 'minecraft_v1_worlds';
+        const main = document.getElementById('main-menu');
+        const worlds = document.getElementById('worlds-menu');
+        const solo = document.getElementById('btn-solo');
+        const back = document.getElementById('btn-back');
+        const newWorld = document.getElementById('btn-new-world');
+        const worldList = document.getElementById('world-list');
+        if (!main || !worlds || !solo || !back || !newWorld || !worldList) return;
+
+        const loadWorlds = () => {
+          try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed : [];
+          } catch {
+            return [];
+          }
+        };
+
+        const saveWorlds = (items) => localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+
+        const renderWorlds = () => {
+          const worldsData = loadWorlds();
+          worldList.innerHTML = '';
+          if (worldsData.length === 0) {
+            const li = document.createElement('li');
+            li.className = 'empty-worlds';
+            li.textContent = 'Aún no tienes mundos. Crea uno nuevo.';
+            worldList.appendChild(li);
+            return;
+          }
+
+          worldsData.forEach((world) => {
+            const li = document.createElement('li');
+            li.className = 'world-item';
+            li.textContent = `${world.name} · Seed: ${world.seed}`;
+            worldList.appendChild(li);
+          });
+        };
+
+        solo.addEventListener('click', () => {
+          main.classList.add('hidden');
+          worlds.classList.remove('hidden');
+          renderWorlds();
+        });
+        back.addEventListener('click', () => {
+          worlds.classList.add('hidden');
+          main.classList.remove('hidden');
+        });
+
+        newWorld.addEventListener('click', () => {
+          const custom = window.confirm('¿Quieres elegir seed? Cancelar = aleatoria');
+          const seed = custom
+            ? (window.prompt('Escribe una seed (vacío = aleatoria):', '') || '').trim()
+            : '';
+          const worldsData = loadWorlds();
+          worldsData.unshift({
+            id: `world-${Date.now()}`,
+            name: `Mundo ${worldsData.length + 1}`,
+            seed: seed || String(Math.floor(Math.random() * 10 ** 9)),
+            removedBlocks: [],
+            placedBlocks: [],
+            createdAt: new Date().toISOString(),
+          });
+          saveWorlds(worldsData);
+          renderWorlds();
+        });
+      })();
+    </script>
+  </body>
+</html>
