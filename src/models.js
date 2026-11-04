@@ -117,6 +117,16 @@ export const MODELS = {
     part({ n: 'arms', s: [8, 4, 4], p: [0, 20, 2], o: [0, 0, 1], c: 0x6a8a4a, r: [-0.75, 0, 0] }),
     ...humanoidLegs(0x6a4a2a, 12),
   ],
+  // Zombie villager (original design): villager silhouette with ashen-green skin and a torn, faded robe
+  zombie_villager: [
+    part({ n: 'head', s: [8, 9, 8], p: [0, 24, 0], o: [0, 4.5, 0], c: 0x7a9a6a, face: (px) => { px(1, 3, 0x2a3a1a, 2, 1); px(5, 3, 0x2a3a1a, 2, 1); px(2, 4, 0xc8d040); px(5, 4, 0xc8d040); px(2, 6, 0x3a4a2a, 4, 1); px(0, 0, 0x5a7a4a, 3, 1); } }),
+    part({ n: 'hood', s: [9, 3, 9], p: [0, 32, 0], o: [0, 1, 0], c: 0x4a4a3a }),
+    part({ n: 'body', s: [8, 12, 6], p: [0, 24, 0], o: [0, -6, 0], c: 0x5a5a4a, skin: { spots: [0x3a3a2a, 0.2] } }),
+    part({ n: 'robe', s: [8, 6, 6], p: [0, 12, 0], o: [0, -3, 0], c: 0x4a4a3a, skin: { spots: [0x2a2a22, 0.25] } }),
+    part({ n: 'arm0', s: [4, 12, 4], p: [-6, 22, 0], o: [0, -4, 0], c: 0x7a9a6a, r: [-Math.PI / 2, 0, 0] }),
+    part({ n: 'arm1', s: [4, 12, 4], p: [6, 22, 0], o: [0, -4, 0], c: 0x7a9a6a, r: [-Math.PI / 2, 0, 0] }),
+    ...humanoidLegs(0x3a3a32, 12),
+  ],
   zombie: humanoid(0x7a8a6a, eyes(0xd8d040, 0x3a2a0a, 3, (px) => { px(2, 6, 0x3a3a2a, 4, 1); px(1, 0, 0x5a6a4a, 3, 1); }), 0x6a4a2a, 0x7a8a6a, 0x3a3a42, { armsForward: true }),
   skeleton: humanoid(0xc1c1c1, (px) => { px(1, 3, 0x2a2a2a, 2, 2); px(5, 3, 0x2a2a2a, 2, 2); px(2, 6, 0x5a5a5a, 4, 1); px(3, 5, 0x3a3a3a, 2, 1); }, 0xb8b8b8, 0xc1c1c1, 0xb0b0b0, { armW: 2, armsForward: true }),
   // Ash ghoul of the Nether (original design): ashen skin, ember eyes, charred tunic.

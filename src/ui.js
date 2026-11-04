@@ -4,6 +4,7 @@ import { iconFor } from './icons.js';
 import { xpForLevel } from './player.js';
 import { tileCanvas } from './textures.js';
 import { ENCHANTS, enchName, tableOffers, anvilCombine, canApply, isEnchanted } from './enchant.js';
+import { PROFESSIONS, LEVEL_NAMES, LEVEL_XP, offerPrice, addTradeXP } from './villagers.js';
 import { EFFECTS, potionName, potionColor, potionEffects, ROMAN, fmtTime, BREW_INGREDIENTS } from './effects.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -398,27 +399,46 @@ export class UI {
       playerInv(panel);
     } else if (name === 'trade') {
       const v = this.screenData;
-      panel.appendChild(el('div', 'label', 'Aldeano - Comercio'));
+      const prof = PROFESSIONS[v.profession];
+      panel.classList.add('wide');
+      panel.appendChild(el('div', 'label', `${prof?.n ?? 'Aldeano'} - ${LEVEL_NAMES[v.vlevel - 1]}`));
+      const next = LEVEL_XP[v.vlevel] ?? null;
+      const bar = el('div', 'vxp'); bar.innerHTML = `<div style="width:${next ? Math.min(100, (v.vxp - LEVEL_XP[v.vlevel - 1]) / (next - LEVEL_XP[v.vlevel - 1]) * 100) : 100}%"></div>`;
+      panel.appendChild(bar);
       const list = el('div', 'trades');
-      for (const t of v.trades) {
-        const row = el('div', 'trade');
-        const cost = el('div', 'slot'); this.fillSlot(cost, { id: I[t.cost[0]], count: t.cost[1] });
-        const arr = el('div', 'arrow small');
-        const out = el('div', 'slot'); this.fillSlot(out, { id: I[t.give[0]], count: t.give[1] });
-        const btn = el('button', 'mc-btn small', 'Comerciar');
+      for (const o of v.offers) {
+        const row = el('div', 'trade' + (o.uses >= o.maxUses ? ' sold' : ''));
+        const price = offerPrice(v, o, v.rep);
+        const cost = el('div', 'slot'); this.fillSlot(cost, { id: I[o.cost[0]], count: price });
+        if (price < o.cost[1]) cost.insertAdjacentHTML('beforeend', `<span class="old-price">${o.cost[1]}</span>`);
+        row.appendChild(cost);
+        if (o.cost2) { const c2 = el('div', 'slot'); this.fillSlot(c2, { id: I[o.cost2[0]], count: o.cost2[1] }); row.appendChild(c2); }
+        row.appendChild(el('div', 'arrow small' + (o.uses >= o.maxUses ? ' x' : '')));
+        const out = el('div', 'slot'); this.fillSlot(out, { id: I[o.give[0]], count: o.give[1], data: o.data });
+        out.title = o.data?.ench ? Object.entries(o.data.ench).map(([k, l]) => enchName(k, l)).join(', ') : ITEMS[I[o.give[0]]].display;
+        row.appendChild(out);
+        const btn = el('button', 'mc-btn small', o.uses >= o.maxUses ? 'Agotado' : 'Comerciar');
         btn.onclick = () => {
-          if (p.countItem(I[t.cost[0]]) >= t.cost[1] || p.mode === 'creative') {
-            if (p.mode !== 'creative') p.takeItem(I[t.cost[0]], t.cost[1]);
-            const left = p.give(I[t.give[0]], t.give[1]);
-            if (left) this.game.spawnItem(p.pos.x, p.pos.y + 1, p.pos.z, { id: I[t.give[0]], count: left });
-            p.addXP(2); this.game.sfx('trade');
-            this.renderScreen();
-          } else this.game.sfx('no');
+          if (o.uses >= o.maxUses) { this.game.sfx('no'); return; }
+          const has = p.mode === 'creative' || (p.countItem(I[o.cost[0]]) >= price && (!o.cost2 || p.countItem(I[o.cost2[0]]) >= o.cost2[1]));
+          if (!has) { this.game.sfx('no'); return; }
+          if (p.mode !== 'creative') { p.takeItem(I[o.cost[0]], price); if (o.cost2) p.takeItem(I[o.cost2[0]], o.cost2[1]); }
+          const left = p.give(I[o.give[0]], o.give[1], 0, o.data ? JSON.parse(JSON.stringify(o.data)) : undefined);
+          if (left) this.game.spawnItem(p.pos.x, p.pos.y + 1, p.pos.z, { id: I[o.give[0]], count: left, data: o.data });
+          o.uses++;
+          v.rep = Math.min(100, (v.rep ?? 0) + 1);
+          addTradeXP(v, o.xp);
+          this.game.spawnXP(v.pos.x, v.pos.y + 1, v.pos.z, 3 + Math.floor(Math.random() * 4));
+          this.game.sfx('trade');
+          this.game.achieve('¿Qué te pongo?');
+          this.renderScreen();
         };
-        row.append(cost, arr, out, btn);
+        row.appendChild(btn);
         list.appendChild(row);
       }
       panel.appendChild(list);
+      const rep = v.rep ?? 0;
+      panel.appendChild(el('div', 'hint dark', `Reputación con este aldeano: ${rep > 0 ? '+' : ''}${rep}${rep >= 20 ? ' (descuentos)' : rep <= -20 ? ' (precios altos)' : ''}`));
       playerInv(panel);
     }
     // bind slot events
@@ -679,19 +699,7 @@ export class UI {
     this.afterClick();
   }
 
-  openTrade(villager) {
-    if (!villager.trades) {
-      const pool = [
-        { cost: ['wheat', 20], give: ['emerald', 1] }, { cost: ['emerald', 1], give: ['bread', 6] }, { cost: ['coal', 15], give: ['emerald', 1] },
-        { cost: ['emerald', 3], give: ['iron_pickaxe', 1] }, { cost: ['paper', 24], give: ['emerald', 1] }, { cost: ['emerald', 1], give: ['bookshelf', 1] },
-        { cost: ['potato', 26], give: ['emerald', 1] }, { cost: ['emerald', 1], give: ['apple', 4] }, { cost: ['emerald', 7], give: ['diamond_sword', 1] },
-        { cost: ['string', 20], give: ['emerald', 1] }, { cost: ['emerald', 1], give: ['arrow', 16] }, { cost: ['emerald', 2], give: ['glass', 4] },
-        { cost: ['rotten_flesh', 32], give: ['emerald', 1] }, { cost: ['emerald', 1], give: ['redstone', 2] }, { cost: ['emerald', 5], give: ['ender_pearl', 1] },
-      ];
-      villager.trades = pool.sort(() => Math.random() - 0.5).slice(0, 5);
-    }
-    this.open('trade', villager);
-  }
+  openTrade(villager) { this.open('trade', villager); }
 
   // ---------------------------------------------------------------- menus
   menu(html, cls = '') {

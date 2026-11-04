@@ -5,6 +5,7 @@ import { moveEntity, aabbIntersectsBlocks } from './physics.js';
 import { buildModel, setTint } from './models.js';
 import { atlasCanvas, tileUV, itemSpriteCanvas, tileCanvas } from './textures.js';
 import { SOLID } from './world.js';
+import { PROFESSIONS, JOB_BLOCK, initVillager, restock } from './villagers.js';
 
 const GRAV = 32;
 let nextEntityId = 1;
@@ -285,6 +286,7 @@ export const MOB_INFO = {
   wolf: { hp: 8, w: 0.6, h: 0.85, speed: 3.6, passive: true, neutral: true, damage: 4, food: ['bone'], drops: [], xp: 2 },
   horse: { hp: 22, w: 1.3, h: 1.6, speed: 3.2, passive: true, food: ['wheat', 'apple'], drops: [['leather', 0, 2]], xp: 2 },
   villager: { hp: 20, w: 0.6, h: 1.95, speed: 2.0, passive: true, drops: [], xp: 0 },
+  zombie_villager: { hp: 20, w: 0.6, h: 1.95, speed: 2.4, damage: 3, drops: [['rotten_flesh', 0, 2]], xp: 5, burns: true },
   iron_golem: { hp: 100, w: 1.4, h: 2.7, speed: 1.6, passive: true, neutral: true, damage: 15, drops: [['iron_ingot', 3, 5], ['poppy', 0, 2]], xp: 0 },
   zombie: { hp: 20, w: 0.6, h: 1.95, speed: 2.6, damage: 3, drops: [['rotten_flesh', 0, 2]], rare: [['iron_ingot', 0.025], ['carrot', 0.025], ['potato', 0.025]], xp: 5, burns: true },
   skeleton: { hp: 20, w: 0.6, h: 1.99, speed: 2.6, damage: 3, ranged: 'arrow', drops: [['bone', 0, 2], ['arrow', 0, 2]], xp: 5, burns: true },
@@ -298,7 +300,7 @@ export const MOB_INFO = {
   blaze: { hp: 20, w: 0.6, h: 1.8, speed: 2.3, flying: true, ranged: 'small_fireball', damage: 6, drops: [['blaze_rod', 0, 1]], xp: 10, fireImmune: true },
   ender_dragon: { hp: 200, w: 8, h: 4, speed: 12, flying: true, damage: 10, drops: [], xp: 12000, boss: true },
 };
-const HOSTILE = new Set(['zombie', 'skeleton', 'creeper', 'spider', 'enderman', 'witch', 'slime', 'zombified_piglin', 'ghast', 'blaze', 'ender_dragon']);
+const HOSTILE = new Set(['zombie_villager', 'zombie', 'skeleton', 'creeper', 'spider', 'enderman', 'witch', 'slime', 'zombified_piglin', 'ghast', 'blaze', 'ender_dragon']);
 
 export class Mob extends Entity {
   constructor(game, type, x, y, z, opts = {}) {
@@ -370,7 +372,22 @@ export class Mob extends Entity {
       if (this.info.neutral || this.hostile) { this.angry = true; this.target = this.game.player; }
       if (this.type === 'zombified_piglin') for (const e of this.game.entities) if (e instanceof Mob && e.type === 'zombified_piglin' && e.pos.distanceTo(this.pos) < 24) { e.angry = true; e.target = this.game.player; }
       this.game.player.lastHurtMob = this;
+      if (this.type === 'villager') {
+        this.rep = (this.rep ?? 0) - 10;
+        for (const e of this.game.entities) if (e instanceof Mob && !e.dead && e.pos.distanceTo(this.pos) < 24) {
+          if (e.type === 'iron_golem') { e.angry = true; e.target = this.game.player; }
+          if (e.type === 'villager' && e !== this) e.rep = (e.rep ?? 0) - 3;
+        }
+        this.panic = 5;
+      }
     } else if (source instanceof Mob) { this.target = source; this.angry = true; }
+    // zombies turn the villagers they kill into zombie villagers
+    if (this.type === 'villager' && this.health <= 0 && source instanceof Mob && (source.type === 'zombie' || source.type === 'zombie_villager') && Math.random() < (this.game.difficulty === 'hard' ? 1 : this.game.difficulty === 'normal' ? 0.5 : 0)) {
+      this.remove = true; this.dead = true;
+      const z = this.game.spawnMob('zombie_villager', this.pos.x, this.pos.y, this.pos.z);
+      if (z) z.villagerData = this.villagerSnapshot();
+      return true;
+    }
     if (this.type === 'enderman' && Math.random() < 0.7) this.teleport();
     if (this.health <= 0) this.die(source);
     return true;
@@ -393,6 +410,61 @@ export class Mob extends Entity {
     if (this.lastAttackedByPlayer || source === this.game.player) this.game.spawnXP(this.pos.x, this.pos.y + 0.5, this.pos.z, this.info.xp);
     if (this.type === 'ender_dragon') this.game.onDragonDeath(this);
   }
+  makeNameLabel() {
+    const c = document.createElement('canvas'); c.width = 256; c.height = 40;
+    const g = c.getContext('2d');
+    g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(0, 0, 256, 40);
+    g.fillStyle = '#fff'; g.font = 'bold 26px monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(this.customName.slice(0, 18), 128, 21);
+    const tex = new THREE.CanvasTexture(c);
+    this.nameLabel = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+    this.nameLabel.scale.set(1.6, 0.25, 1);
+    this.nameLabel.position.y = this.h + 0.45;
+    this.mesh.add(this.nameLabel);
+  }
+  villagerSnapshot() { return { profession: this.profession, vlevel: this.vlevel, vxp: this.vxp, offers: this.offers, rep: this.rep, home: this.home }; }
+  villagerTick(dt) {
+    const g = this.game, w = this.world;
+    this.jobTimer = (this.jobTimer ?? Math.random() * 3) - dt;
+    if (this.jobTimer <= 0) {
+      this.jobTimer = 3;
+      // lose the job if the work station is gone (only while still a novice without trades used)
+      if (this.jobPos && !JOB_BLOCK[BLOCKS[w.getBlock(...this.jobPos)]?.name] && w.isLoaded(this.jobPos[0], this.jobPos[2])) {
+        g.jobClaims?.delete(this.jobPos.join(','));
+        this.jobPos = null;
+        if (this.vlevel === 1 && this.vxp === 0) { this.profession = null; this.offers = []; this.applyRobe(); }
+      }
+      if (!this.profession && !this.nitwit) {
+        const x0 = Math.floor(this.pos.x), y0 = Math.floor(this.pos.y), z0 = Math.floor(this.pos.z);
+        outer: for (let dx = -10; dx <= 10; dx++) for (let dz = -10; dz <= 10; dz++) for (let dy = -2; dy <= 3; dy++) {
+          const id = w.getBlock(x0 + dx, y0 + dy, z0 + dz);
+          const prof = JOB_BLOCK[BLOCKS[id]?.name];
+          if (!prof) continue;
+          const key = `${x0 + dx},${y0 + dy},${z0 + dz}`;
+          if (g.jobClaims?.has(key) && g.jobClaims.get(key) !== this.id) continue;
+          (g.jobClaims ??= new Map()).set(key, this.id);
+          this.jobPos = [x0 + dx, y0 + dy, z0 + dz];
+          initVillager(this, prof);
+          this.applyRobe();
+          g.particles?.burst(this.pos.x, this.pos.y + 2, this.pos.z, 0x60ff60);
+          break outer;
+        }
+      }
+      // restock twice a day near the job site
+      const day = Math.floor((g.time + 6000) / 12000);
+      if (this.profession && this.lastRestock !== day && this.jobPos && this.pos.distanceTo(new THREE.Vector3(...this.jobPos)) < 6) { this.lastRestock = day; restock(this); }
+    }
+    if (this.leveledUp > 0) { this.leveledUp -= dt; if (Math.random() < dt * 8) g.particles?.burst(this.pos.x, this.pos.y + 2.2, this.pos.z, 0x40ff40); }
+    // wander toward the job site during work hours
+    const tday = g.time % 24000;
+    if (this.jobPos && tday > 2000 && tday < 9000 && !this.wanderTarget && Math.random() < dt * 0.3) this.wanderTarget = new THREE.Vector3(this.jobPos[0] + 0.5, this.pos.y, this.jobPos[2] + 0.5);
+  }
+  applyRobe() {
+    const prof = PROFESSIONS[this.profession];
+    const set = (n, col) => { const m = this.parts[n]?.userData.mesh; if (m) m.userData.tint = col; };
+    if (prof) { set('body', prof.robe); set('robe', prof.robe); set('hood', prof.hat); set('arms', prof.robe); }
+    else { for (const n of ['body', 'robe', 'hood', 'arms']) { const m = this.parts[n]?.userData.mesh; if (m) delete m.userData.tint; } }
+  }
   applyPotion(effects) {
     const undead = ['zombie', 'skeleton', 'zombified_piglin', 'husk', 'drowned', 'stray', 'wither_skeleton', 'phantom', 'wither', 'zoglin'].includes(this.type);
     for (const ef of effects) {
@@ -402,6 +474,7 @@ export class Mob extends Entity {
       else if (e === 'instant_damage') { this.hurtTime = 0; this.hurt(6 << ef.a, null); }
       else if (e === 'poison' && !undead) this.poison = Math.max(this.poison ?? 0, ef.t);
       else if (e === 'slowness') this.slowFor = Math.max(this.slowFor ?? 0, ef.t);
+      else if (e === 'weakness') this.weakFor = Math.max(this.weakFor ?? 0, ef.t);
       else if (e === 'speed') this.fastFor = Math.max(this.fastFor ?? 0, ef.t);
     }
   }
@@ -445,6 +518,19 @@ export class Mob extends Entity {
     }
     if (this.pos.y < -40) { this.health = 0; this.die(null); return; }
     if (this.type === 'enderman' && this.inWater) this.teleport();
+    if (this.type === 'villager') this.villagerTick(dt);
+    if (this.type === 'zombie_villager' && this.curing > 0) {
+      this.curing -= dt;
+      if (Math.random() < dt * 6) this.game.particles?.burst(this.pos.x, this.pos.y + 1.5, this.pos.z, 0xff60a0);
+      if (this.curing <= 0) {
+        this.remove = true; this.dead = true;
+        const v = this.game.spawnMob('villager', this.pos.x, this.pos.y, this.pos.z);
+        if (v && this.villagerData) Object.assign(v, this.villagerData);
+        if (v) { v.rep = (v.rep ?? 0) + 50; v.applyRobe(); }
+        this.game.sfx('levelup'); this.game.achieve('Doctor zombi');
+        return;
+      }
+    }
     // AI
     let moveDir = null, speed = this.info.speed * (this.slowFor > 0 ? 0.6 : 1) * (this.fastFor > 0 ? 1.4 : 1), wantJump = false;
     const toPlayer = p.pos.clone().sub(this.pos);
@@ -711,12 +797,14 @@ export class Mob extends Entity {
     if (this.type === 'creeper' && this.fuse > 0 && Math.floor(this.fuse * 8) % 2) { r = g = b = 1.5; }
     if (this.type === 'blaze' || this.type === 'ghast' && this.attackCooldown > 2.5) { r = g = b = Math.max(l, 0.9); }
     for (const m of this.mats) m.color.setRGB(r, g, b);
-    const body = this.parts.body?.userData.mesh;
-    if (body?.userData.tint) {
-      const c = new THREE.Color(body.userData.tint);
-      const mats = Array.isArray(body.material) ? body.material : [body.material];
+    for (const pv of Object.values(this.parts)) {
+      const mesh = pv.userData.mesh;
+      if (!mesh?.userData.tint) continue;
+      const c = new THREE.Color(mesh.userData.tint);
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       for (const m of mats) m.color.setRGB(c.r * r, c.g * g, c.b * b);
     }
+    if (this.customName && !this.nameLabel) this.makeNameLabel();
     this.model.rotation.y = this.yaw;
   }
 }

@@ -392,7 +392,8 @@ export class Generator {
       }
     }
     // interior
-    set(x0 + 1, h + 1, z0 + 1, B.crafting_table);
+    const jobs = [B.composter, B.lectern, B.barrel, B.smoker, B.blast_furnace, B.smithing_table, B.grindstone, B.fletching_table, B.loom, B.cartography_table, B.brewing_stand, B.stonecutter, B.cauldron];
+    set(x0 + 1, h + 1, z0 + 1, jobs[(b.seed >>> 3) % jobs.length]);
     set(x0 + s - 2, h + 1, z0 + 1, B.bed, 0 | 4);
     set(x0 + s - 2, h + 1, z0 + 2, B.bed, 0);
     set(x0 + 1, h + 1, z0 + s - 2, B.chest, 4);

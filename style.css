@@ -209,3 +209,11 @@ body.touch #effects { top: calc(56px + env(safe-area-inset-top)); }
 .cost.ok { color: #3a8a1a; } .cost.bad { color: #c02020; }
 .g4 { grid-template-columns: repeat(4, var(--slot)); }
 .cut-opts { margin-left: calc(8px * var(--s)); }
+
+.inv-panel.wide { width: calc(230px * var(--s)); }
+.vxp { height: calc(4px * var(--s)); background: #555; border: 1px solid #222; margin-bottom: calc(4px * var(--s)); }
+.vxp div { height: 100%; background: #80ff20; }
+.trade.sold { opacity: 0.55; }
+.arrow.x { background: linear-gradient(90deg, #c03030 0 70%, transparent 70%); }
+.old-price { position: absolute; left: 1px; top: -1px; font-size: calc(6px * var(--s)); color: #c03030; text-decoration: line-through; }
+.trades { max-height: calc(110px * var(--s)); overflow-y: auto; }

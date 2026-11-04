@@ -290,7 +290,7 @@ class Game {
       p.inventory = ps.inventory; p.armor = ps.armor; p.selected = ps.selected ?? 0; p.mode = ps.mode ?? meta.mode;
       p.spawnPoint = ps.spawnPoint; p.flying = ps.flying ?? false;
       this.loadChunksAround(true);
-      for (const m of save.mobs ?? []) { const e = this.spawnMob(m.type, m.x, m.y, m.z, { baby: m.baby, woolColor: m.wool }); if (e) { e.tamed = m.tamed; e.home = m.home; if (m.tamed) e.owner = this.player; if (m.sheared) e.shear(); } }
+      for (const m of save.mobs ?? []) { const e = this.spawnMob(m.type, m.x, m.y, m.z, { baby: m.baby, woolColor: m.wool }); if (e) { e.tamed = m.tamed; e.home = m.home; e.customName = m.name; if (m.v) { Object.assign(e, m.v); e.applyRobe(); } if (m.tamed) e.owner = this.player; if (m.sheared) e.shear(); } }
     } else if (this.player.mode === 'creative') this.player.give(I.grass_block, 1);
     this.running = true;
     this.ui.screen = null;
@@ -534,7 +534,7 @@ class Game {
     const dims = { ...this.dimData, [this.dim]: this.world.serialize() };
     const p = this.player;
     const mobs = this.entities.filter((e) => e instanceof Mob && !e.dead && !e.hostile && e.type !== 'ender_dragon' && e.pos.distanceTo(p.pos) < 96)
-      .map((e) => ({ type: e.type, x: e.pos.x, y: e.pos.y, z: e.pos.z, baby: e.baby, tamed: e.tamed, sheared: e.sheared, wool: e.woolColor, home: e.home }));
+      .map((e) => ({ type: e.type, x: e.pos.x, y: e.pos.y, z: e.pos.z, baby: e.baby, tamed: e.tamed, sheared: e.sheared, wool: e.woolColor, home: e.home, name: e.customName, v: e.type === 'villager' ? { ...e.villagerSnapshot(), jobPos: e.jobPos, nitwit: e.nitwit } : undefined }));
     const keptVillages = this.dim === 'overworld' ? [...new Set(mobs.map((m) => m.home).filter(Boolean))] : [...this.villagesSpawned];
     const data = {
       version: 2, seed: this.seed, time: this.time, dims, villagesSpawned: keptVillages, weather: { target: this.weather.target, thunder: this.weather.thunder, timer: this.weather.timer }, dragonKilled: this.dragonKilled, keepInventory: this.keepInventory,
@@ -765,7 +765,7 @@ class Game {
         const b = v.buildings[i % v.buildings.length];
         const sx = Math.floor((b.x + v.x) / 2) + (i % 3) - 1, sz = Math.floor((b.z + v.z) / 2);
         const sy = w.surfaceY(sx, sz);
-        if (sy > 0) { const e = this.spawnMob('villager', sx + 0.5, sy + 1, sz + 0.5, { baby: Math.random() < 0.2 }); if (e) e.home = v.id; }
+        if (sy > 0) { const e = this.spawnMob('villager', sx + 0.5, sy + 1, sz + 0.5, { baby: Math.random() < 0.2 }); if (e) { e.home = v.id; e.nitwit = Math.random() < 0.05; } }
       }
       const gy = w.surfaceY(v.x + 4, v.z + 4);
       if (gy > 0) { const e = this.spawnMob('iron_golem', v.x + 4.5, gy + 1, v.z + 4.5); if (e) e.home = v.id; }
@@ -890,7 +890,7 @@ class Game {
         const eff = Math.max((l >> 4) * this.daylightLevel, l & 15);
         if (eff > 7) continue;
         const r = Math.random();
-        const type = y < 40 && r < 0.05 ? 'slime' : r < 0.3 ? 'zombie' : r < 0.55 ? 'skeleton' : r < 0.77 ? 'creeper' : r < 0.94 ? 'spider' : r < 0.985 ? 'enderman' : 'witch';
+        const type = y < 40 && r < 0.05 ? 'slime' : r < 0.03 ? 'zombie_villager' : r < 0.3 ? 'zombie' : r < 0.55 ? 'skeleton' : r < 0.77 ? 'creeper' : r < 0.94 ? 'spider' : r < 0.985 ? 'enderman' : 'witch';
         if (type === 'enderman' && (w.getBlock(x, y + 2, z))) continue;
         this.spawnMob(type, x + 0.5, y, z + 0.5);
       } else if (this.dim === 'nether') {

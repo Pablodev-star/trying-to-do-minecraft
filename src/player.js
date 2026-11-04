@@ -481,7 +481,8 @@ export class Player {
       const e = p.entity;
       const name = it?.name;
       if (it?.name === 'name_tag' && held.data?.name) { e.customName = held.data.name; e.persistent = true; this.consumeHeld(); g.chat(`Has nombrado a la criatura: ${held.data.name}`); return; }
-      if (e.type === 'villager') { g.ui.openTrade(e); return; }
+      if (e.type === 'zombie_villager' && name === 'golden_apple' && e.weakFor > 0 && !(e.curing > 0)) { e.curing = 20; e.persistent = true; this.consumeHeld(); g.sfx('fizz'); return; }
+      if (e.type === 'villager') { if (e.baby || e.nitwit || !e.profession) { g.sfx('no'); g.chat(e.nitwit ? 'Este aldeano no sabe comerciar.' : 'Este aldeano todavía no tiene profesión. Coloca cerca un bloque de trabajo.'); return; } g.ui.openTrade(e); return; }
       if (e.type === 'sheep' && name === 'shears') { if (e.shear()) { this.damageHeld(); g.sfx('shear'); } return; }
       if (e.type === 'cow' && name === 'bucket') { this.replaceHeld(I.milk_bucket); return; }
       if (e.type === 'wolf' && name === 'bone' && !e.tamed) {
