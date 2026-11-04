@@ -1,6 +1,8 @@
 // Terrain generators for the Overworld, Nether and End.
 import { Simplex, hash3, mulberry32 } from './noise.js';
-import { B } from './registry.js';
+import { B, BLOCKS } from './registry.js';
+const BLOCKS_REPLACE = new Set();
+queueMicrotask(() => { for (const b of BLOCKS) if (b.replaceable || b.render === 'cross') BLOCKS_REPLACE.add(b.id); });
 
 export const CS = 16;      // chunk size x/z
 export const CH = 128;     // world height
@@ -81,7 +83,13 @@ export class Generator {
     if (this.dim === 'nether') this.genNether(cx, cz, data, biomes);
     else if (this.dim === 'end') this.genEnd(cx, cz, data, biomes);
     else this.genOverworld(cx, cz, data, biomes);
-    return { data, biomes };
+    let meta = null;
+    if (this.pendingMeta?.length) {
+      meta = new Uint8Array(CS * CS * CH);
+      for (const [pcx, pcz, i, m] of this.pendingMeta) if (pcx === cx && pcz === cz) meta[i] = m;
+      this.pendingMeta = [];
+    }
+    return { data, biomes, meta };
   }
 
   // ------------------------------------------------------------ overworld
@@ -157,6 +165,8 @@ export class Generator {
     if (biomes[0] === 8) vein(B.emerald_ore, 4, 1, 4, 32);
     // features (trees etc) from this and neighbouring chunks
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) this.featuresOverworld(cx + dx, cz + dz, cx, cz, data);
+    this.placeVillages(cx, cz, data);
+    this.placeDungeon(cx, cz, data);
     this.placeStronghold(cx, cz, data);
   }
 
@@ -251,6 +261,170 @@ export class Generator {
       }
     }
     set(x, top + (kind === 'jungle' ? 1 : 0), z, L);
+  }
+
+  // ------------------------------------------------------------ villages
+  villageAt(gx, gz) {
+    const key = `${gx},${gz}`;
+    this.villageCache ??= new Map();
+    if (this.villageCache.has(key)) return this.villageCache.get(key);
+    const r = mulberry32((this.seed * 7919 + gx * 92821 + gz * 68917) >>> 0);
+    let v = null;
+    if (r() < 0.7) {
+      const x = gx * 320 + 60 + Math.floor(r() * 200), z = gz * 320 + 60 + Math.floor(r() * 200);
+      const info = this.heightInfo(x, z);
+      if ([2, 6, 10, 3].includes(info.biome) && info.h > SEA && info.h < 85) {
+        const desert = info.biome === 6;
+        const buildings = [];
+        const slots = [[13, 0], [-13, 0], [0, 13], [0, -13], [13, 13], [-13, -13], [13, -13], [-13, 13], [26, 0], [0, 26]];
+        const n = 5 + Math.floor(r() * 4);
+        for (let i = 0; i < n && i < slots.length; i++) {
+          const [ox, oz] = slots[i];
+          const kind = i === 2 || i === 6 ? 'farm' : r() < 0.2 ? 'lamp_house' : 'house';
+          const bx = x + ox, bz = z + oz;
+          const bh = this.heightInfo(bx, bz).h;
+          if (bh <= SEA || Math.abs(bh - info.h) > 6) continue;
+          buildings.push({ kind, x: bx, z: bz, h: bh, size: kind === 'farm' ? 9 : 7, seed: (r() * 1e9) | 0 });
+        }
+        v = { x, z, h: info.h, desert, buildings, id: key };
+      }
+    }
+    this.villageCache.set(key, v);
+    return v;
+  }
+  villagesNear(x, z, radius = 1) {
+    const gx = Math.floor(x / 320), gz = Math.floor(z / 320);
+    const out = [];
+    for (let dx = -radius; dx <= radius; dx++) for (let dz = -radius; dz <= radius; dz++) { const v = this.villageAt(gx + dx, gz + dz); if (v) out.push(v); }
+    return out;
+  }
+  placeVillages(cx, cz, data) {
+    const ox = cx * CS, oz = cz * CS;
+    for (const v of this.villagesNear(ox + 8, oz + 8)) {
+      if (Math.abs(v.x - ox) > 60 || Math.abs(v.z - oz) > 60) continue;
+      const set = (wx, wy, wz, id, meta = 0) => {
+        const x = wx - ox, z = wz - oz;
+        if (x < 0 || x >= 16 || z < 0 || z >= 16 || wy <= 0 || wy >= CH) return;
+        data[idx(x, wy, z)] = id;
+        if (meta) (this.pendingMeta ??= []).push([cx, cz, idx(x, wy, z), meta]);
+      };
+      const get = (wx, wy, wz) => { const x = wx - ox, z = wz - oz; if (x < 0 || x >= 16 || z < 0 || z >= 16) return -1; return data[idx(x, wy, z)]; };
+      const wall = v.desert ? B.sandstone : B.oak_planks, corner = v.desert ? B.sandstone : B.oak_log, floor = v.desert ? B.sandstone : B.cobblestone;
+      const roofSlab = v.desert ? B.sandstone_slab : B.oak_slab;
+      // paths: from centre to each building
+      const pathAt = (px, pz) => {
+        const h = this.heightInfo(px, pz).h;
+        const cur = get(px, h, pz);
+        if (cur === B.grass_block || cur === B.dirt || cur === B.sand || cur === B.podzol) set(px, h, pz, v.desert ? B.sandstone : B.path);
+        for (let y = h + 1; y < h + 3; y++) { const a = get(px, y, pz); if (a === B.short_grass || a === B.fern || a === B.dandelion || a === B.poppy) set(px, y, pz, 0); }
+      };
+      for (const b of v.buildings) {
+        for (const w of [-1, 0, 1]) {
+          for (let x = Math.min(v.x, b.x); x <= Math.max(v.x, b.x); x++) pathAt(x, v.z + w);
+          for (let z = Math.min(v.z, b.z); z <= Math.max(v.z, b.z); z++) pathAt(b.x + w, z);
+        }
+      }
+      // well
+      const wy = v.h;
+      for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
+        for (let y = wy - 3; y <= wy + 4; y++) set(v.x + dx, y, v.z + dz, 0);
+        set(v.x + dx, wy - 4, v.z + dz, B.cobblestone);
+        const edge = Math.abs(dx) === 2 || Math.abs(dz) === 2;
+        for (let y = wy - 3; y <= wy; y++) set(v.x + dx, y, v.z + dz, edge ? B.cobblestone : B.water);
+        if (edge) set(v.x + dx, wy + 1, v.z + dz, B.cobblestone_slab);
+        if (Math.abs(dx) === 2 && Math.abs(dz) === 2) { set(v.x + dx, wy + 1, v.z + dz, B.oak_fence); set(v.x + dx, wy + 2, v.z + dz, B.oak_fence); }
+        set(v.x + dx, wy + 3, v.z + dz, roofSlab);
+      }
+      set(v.x, wy + 2, v.z, B.lantern);
+      for (const b of v.buildings) this.placeBuilding(b, v, set, get, { wall, corner, floor, roofSlab });
+    }
+  }
+  placeBuilding(b, v, set, get, M) {
+    const r = mulberry32(b.seed);
+    const s = b.size, x0 = b.x - (s >> 1), z0 = b.z - (s >> 1), h = b.h;
+    if (b.kind === 'farm') {
+      for (let dx = 0; dx < s; dx++) for (let dz = 0; dz < s; dz++) {
+        const x = x0 + dx, z = z0 + dz;
+        for (let y = h + 1; y < h + 4; y++) set(x, y, z, 0);
+        const edge = dx === 0 || dz === 0 || dx === s - 1 || dz === s - 1;
+        if (edge) { set(x, h, z, B.oak_log); continue; }
+        if (dx === (s >> 1)) { set(x, h, z, B.water); continue; }
+        set(x, h, z, B.farmland_wet);
+        const crops = [B.wheat_0, B.carrots_0, B.potatoes_0];
+        set(x, h + 1, z, crops[(dz + (b.seed & 3)) % 3] + 4 + Math.floor(r() * 4));
+      }
+      return;
+    }
+    // foundation and clearing
+    for (let dx = 0; dx < s; dx++) for (let dz = 0; dz < s; dz++) {
+      const x = x0 + dx, z = z0 + dz;
+      for (let y = h - 4; y < h; y++) { const c = get(x, y, z); if (c === 0 || c === B.water || c === -1 || BLOCKS_REPLACE.has(c)) set(x, y, z, M.floor); }
+      set(x, h, z, M.floor);
+      for (let y = h + 1; y <= h + 8; y++) set(x, y, z, 0);
+    }
+    // walls
+    for (let dx = 0; dx < s; dx++) for (let dz = 0; dz < s; dz++) {
+      const edgeX = dx === 0 || dx === s - 1, edgeZ = dz === 0 || dz === s - 1;
+      if (!edgeX && !edgeZ) continue;
+      const x = x0 + dx, z = z0 + dz;
+      for (let y = h + 1; y <= h + 3; y++) {
+        let id = edgeX && edgeZ ? M.corner : M.wall;
+        if (y === h + 2 && !(edgeX && edgeZ) && ((edgeX && dz === (s >> 1)) || (edgeZ && dx === (s >> 1)))) id = B.glass_pane;
+        set(x, y, z, id);
+      }
+    }
+    // door facing the village centre
+    const toX = v.x - b.x, toZ = v.z - b.z;
+    let ddx = 0, ddz = 0, dmeta = 0;
+    if (Math.abs(toX) > Math.abs(toZ)) { ddx = Math.sign(toX); dmeta = ddx > 0 ? 3 : 1; } else { ddz = Math.sign(toZ) || 1; dmeta = ddz > 0 ? 0 : 2; }
+    const half = s >> 1;
+    const doorX = b.x + ddx * half, doorZ = b.z + ddz * half;
+    set(doorX, h + 1, doorZ, B.oak_door, dmeta);
+    set(doorX, h + 2, doorZ, B.oak_door, dmeta | 4);
+    set(doorX + ddx, h, doorZ + ddz, v.desert ? B.sandstone_stairs : B.cobblestone_stairs, [2, 1, 0, 3][dmeta]);
+    // roof
+    for (let layer = 0; layer < 3; layer++) {
+      const y = h + 4 + layer;
+      for (let dx = layer - 1; dx <= s - layer; dx++) for (let dz = layer - 1; dz <= s - layer; dz++) {
+        const top = layer === 2 || dx === layer - 1 || dz === layer - 1 || dx === s - layer || dz === s - layer;
+        if (layer < 2 && !top) continue;
+        set(x0 + dx, y, z0 + dz, layer === 2 ? M.roofSlab : (v.desert ? B.sandstone : B.spruce_planks));
+      }
+    }
+    // interior
+    set(x0 + 1, h + 1, z0 + 1, B.crafting_table);
+    set(x0 + s - 2, h + 1, z0 + 1, B.bed, 0 | 4);
+    set(x0 + s - 2, h + 1, z0 + 2, B.bed, 0);
+    set(x0 + 1, h + 1, z0 + s - 2, B.chest, 4);
+    set(x0 + 1, h + 3, z0 + half, B.torch, 2);
+    set(x0 + s - 2, h + 3, z0 + half, B.torch, 4);
+    if (b.kind === 'lamp_house') { set(b.x + ddx * (half + 2), h + 1, b.z + ddz * (half + 2) + 1, B.oak_fence); set(b.x + ddx * (half + 2), h + 2, b.z + ddz * (half + 2) + 1, B.oak_fence); set(b.x + ddx * (half + 2), h + 3, b.z + ddz * (half + 2) + 1, B.lantern); }
+  }
+
+  // ------------------------------------------------------------ dungeons
+  placeDungeon(cx, cz, data) {
+    for (let dcx = -1; dcx <= 1; dcx++) for (let dcz = -1; dcz <= 1; dcz++) {
+      const fx = cx + dcx, fz = cz + dcz;
+      const r = mulberry32((this.seed ^ (fx * 4517 + fz * 7703 + 991)) >>> 0);
+      if (r() > 0.06) continue;
+      const x = fx * CS + 4 + Math.floor(r() * 8), z = fz * CS + 4 + Math.floor(r() * 8), y = 14 + Math.floor(r() * 26);
+      if (this.heightInfo(x, z).h < y + 8) continue;
+      const mob = Math.floor(r() * 3);
+      const ox = cx * CS, oz = cz * CS;
+      const set = (wx, wy, wz, id, meta = 0) => {
+        const lx = wx - ox, lz = wz - oz;
+        if (lx < 0 || lx >= 16 || lz < 0 || lz >= 16) return;
+        data[idx(lx, wy, lz)] = id;
+        if (meta) (this.pendingMeta ??= []).push([cx, cz, idx(lx, wy, lz), meta]);
+      };
+      for (let dx = -4; dx <= 4; dx++) for (let dz = -4; dz <= 4; dz++) for (let dy = -1; dy <= 4; dy++) {
+        const edge = Math.abs(dx) === 4 || Math.abs(dz) === 4 || dy === -1 || dy === 4;
+        set(x + dx, y + dy, z + dz, edge ? (hash3(this.seed, x + dx, y + dy, z + dz) < 0.4 ? B.mossy_cobblestone : B.cobblestone) : 0);
+      }
+      set(x, y, z, B.spawner, mob + 1);
+      set(x + 3, y, z - 3, B.chest, 4);
+      if (r() < 0.6) set(x - 3, y, z + 3, B.chest, 4);
+    }
   }
 
   placeStronghold(cx, cz, data) {

@@ -104,6 +104,7 @@ export class World {
     this.rng = mulberry32(seed ^ 0xabcdef);
     this.hasSky = dim === 'overworld';
     this.listeners = [];
+    this.spawners = new Set();
   }
   key(cx, cz) { return cx + ',' + cz; }
   getChunk(cx, cz) { return this.chunks.get(cx + ',' + cz); }
@@ -113,12 +114,13 @@ export class World {
     let c = this.chunks.get(k);
     if (c) return c;
     const g = this.gen.generate(cx, cz);
-    let meta = null;
+    let meta = g.meta ?? null;
     const sv = this.saved[k];
     if (sv) { g.data.set(rleDecode(sv.d, g.data.length)); meta = rleDecode(sv.m, g.data.length); }
     c = new Chunk(cx, cz, g.data, g.biomes, meta);
     if (sv) c.modified = true;
     this.chunks.set(k, c);
+    for (let i = 0; i < g.data.length; i++) if (g.data[i] === B.spawner) this.spawners.add(`${(i & 15) + cx * CS},${i >> 8},${((i >> 4) & 15) + cz * CS}`);
     // neighbours need relight/remesh for borders
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const n = this.getChunk(cx + dx, cz + dz);
@@ -511,7 +513,7 @@ export class World {
           const nx = x + F.n[0], ny = y + F.n[1], nz = z + F.n[2];
           const nid = getP(nx, ny, nz);
           if (OPAQUE[nid]) continue;
-          if (nid === id && !b.opaque && !b.tint?.startsWith('foliage')) continue; // glass/ice culling (leaves stay "fancy")
+          if (nid === id && !b.opaque && !(this.game?.options?.fancy && b.tint?.startsWith('foliage'))) continue; // glass/ice (and leaves on "fast" graphics)
           const tex = texFor(b, f, meta);
           const tint = b.tint && (b.tint !== 'grass_top' || F.side === 'top') ? tintFor(b.tint, x, z) : null;
           emitFace(buf, F, x, y, z, tex, tint, getP, getL, [0, 0, 0, 1, 1, 1], false, false, b.tint?.startsWith('foliage') ? 1 : 0);

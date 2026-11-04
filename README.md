@@ -69,9 +69,20 @@ En el inventario: clic izquierdo para coger o dejar, clic derecho para la mitad 
 - **Interfaz**: menús, lista de mundos, creación con semilla, opciones (FOV, distancia de renderizado, sensibilidad, volumen, escala de interfaz, dificultad), chat, logros y estadísticas.
 - **Guardado**: los mundos se guardan automáticamente en `localStorage`. Solo se guardan los chunks modificados.
 
+## Novedades
+
+- **Shaders** (Opciones → Shaders, empiezan apagados): sombras del sol y la luna, hojas y plantas que se mueven con el viento, agua con olas, reflejos y brillo del sol, luz cálida de antorchas, bruma iluminada por el sol, bloom, rayos de sol, tono cinematográfico y viñeta. Son exigentes: en móviles o equipos modestos pueden ir lentos.
+- **Gráficos Rápidos/Detallados** (hojas con o sin caras interiores).
+- **Clima**: lluvia, nieve en biomas fríos y tormentas con relámpagos; la lluvia no atraviesa techos y apaga el ardor de los zombis. Comando `/weather clear|rain|thunder`.
+- **Aldeas** con casas, pozo, caminos, granjas, faroles, aldeanos y gólem de hierro (`/locate village`).
+- **Mazmorras** subterráneas con generador de monstruos y cofres con botín.
+- **Orbes de experiencia** al matar mobs o picar menas.
+- **Bloques nuevos**: losas (dos losas forman un bloque), escaleras (también invertidas), vallas que se conectan, paneles de cristal, barrotes de hierro, farol, camino de tierra, antorchas en la pared, puertas de dos bloques que se abren y camas de dos bloques.
+- Texturas animadas de agua, lava y portal; cielo con degradado.
+
 ## Comandos (requieren trucos activados)
 
-`/gamemode`, `/time set`, `/tp`, `/give`, `/summon`, `/kill`, `/xp`, `/difficulty`, `/spawnpoint`, `/locate`, `/setblock`, `/clear`, `/heal`, `/dimension`, `/gamerule keepInventory true`, `/seed`, `/help`
+`/gamemode`, `/time set`, `/weather`, `/tp`, `/give`, `/summon`, `/kill`, `/xp`, `/difficulty`, `/spawnpoint`, `/locate [village]`, `/setblock`, `/clear`, `/heal`, `/dimension`, `/gamerule keepInventory true`, `/seed`, `/help`
 
 ## Estructura
 
@@ -80,6 +91,8 @@ index.html, style.css
 lib/three.module.min.js   Three.js r160 (MIT)
 src/main.js       bucle de juego, menús, reglas, portales, explosiones, spawneo, guardado
 src/world.js      chunks, luz, mallado, fluidos, ticks aleatorios
+src/shaders.js    shaders del mundo, sombras y post-procesado
+src/shapes.js     formas de losas, escaleras, vallas, puertas...
 src/worldgen.js   generación del Overworld, el Nether y el End
 src/registry.js   bloques, ítems, recetas, fundición
 src/textures.js   texturas procedurales (atlas + sprites)

@@ -197,6 +197,8 @@ block('nether_brick_fence', 'Valla de ladrillos del Nether', { tex: 'nether_bric
 block('glass_pane', 'Panel de cristal', { tex: 'glass', render: 'box', shape: 'pane', opaque: false, pass: 'cutout', hardness: 0.3, drops: null, sound: 'glass' });
 block('iron_bars', 'Barrotes de hierro', { tex: 'iron_bars', render: 'box', shape: 'pane', opaque: false, pass: 'cutout', hardness: 5, tool: 'pickaxe', needsTool: true });
 block('lantern', 'Farol', { tex: T('lantern_top', 'lantern'), render: 'box', box: [5, 0, 5, 11, 9, 11], opaque: false, hardness: 3.5, tool: 'pickaxe', light: 15, sound: 'stone' });
+block('spawner', 'Generador de monstruos', { render: 'cube', pass: 'cutout', opaque: false, hardness: 5, tool: 'pickaxe', needsTool: true, drops: null, light: 0 });
+block('path', 'Camino de tierra', { tex: T('path_top', 'path_side', 'dirt'), render: 'box', box: [0, 0, 0, 16, 15, 16], pass: 'opaque', opaque: false, hardness: 0.65, tool: 'shovel', drops: 'dirt', sound: 'grass' });
 block('fire', 'Fuego', { render: 'cross', solid: false, opaque: false, hardness: 0, noItem: true, drops: null, light: 15, replaceable: true });
 
 

@@ -4,7 +4,7 @@ import { BLOCKS, B, ITEMS, I, SMELTING, fuelTime } from './registry.js';
 import { World, worldUniforms, CS, CH, SOLID, OPAQUE } from './world.js';
 import { BIOMES } from './worldgen.js';
 import { Player } from './player.js';
-import { Mob, ItemEntity, FallingBlock, PrimedTNT, Projectile, EndCrystal, makeItemMesh, MOB_INFO } from './entities.js';
+import { Mob, ItemEntity, FallingBlock, PrimedTNT, Projectile, EndCrystal, XPOrb, makeItemMesh, MOB_INFO } from './entities.js';
 import { buildModel } from './models.js';
 import { UI, escapeHtml } from './ui.js';
 import { tileCanvas, atlasCanvas } from './textures.js';
@@ -91,6 +91,7 @@ class Game {
 
   // ---------------------------------------------------------------- options
   applyGuiScale() { document.documentElement.style.setProperty('--s', this.options.guiScale); }
+  remeshAll() { if (this.world) for (const c of this.world.chunks.values()) c.meshDirty = true; }
   saveOptions() { try { localStorage.setItem('mc_options', JSON.stringify(this.options)); } catch { /* ignore */ } audio.volume = this.options.volume / 100; this.applyGuiScale(); }
   get difficulty() { return this.options.difficulty; }
   get difficultyMul() { return { peaceful: 0, easy: 0.5, normal: 1, hard: 1.5 }[this.options.difficulty]; }
@@ -268,6 +269,7 @@ class Game {
     this.dimData = save?.dims ?? {};
     this.time = save?.time ?? 1000;
     this.dragonKilled = save?.dragonKilled ?? false;
+    this.villagesSpawned = new Set(save?.villagesSpawned ?? []);
     if (save?.weather) Object.assign(this.weather, save.weather, { rain: save.weather.target });
     else Object.assign(this.weather, { rain: 0, target: 0, thunder: false, timer: 300 + Math.random() * 400 });
     this.keepInventory = save?.keepInventory ?? false;
@@ -532,7 +534,7 @@ class Game {
     const mobs = this.entities.filter((e) => e instanceof Mob && !e.dead && !e.hostile && e.type !== 'ender_dragon' && e.pos.distanceTo(p.pos) < 96)
       .map((e) => ({ type: e.type, x: e.pos.x, y: e.pos.y, z: e.pos.z, baby: e.baby, tamed: e.tamed, sheared: e.sheared, wool: e.woolColor }));
     const data = {
-      version: 1, seed: this.seed, time: this.time, dims, weather: { target: this.weather.target, thunder: this.weather.thunder, timer: this.weather.timer }, dragonKilled: this.dragonKilled, keepInventory: this.keepInventory,
+      version: 1, seed: this.seed, time: this.time, dims, villagesSpawned: [...this.villagesSpawned], weather: { target: this.weather.target, thunder: this.weather.thunder, timer: this.weather.timer }, dragonKilled: this.dragonKilled, keepInventory: this.keepInventory,
       achievements: [...this.achievements], stats: this.stats, mobs: this.dim === 'overworld' ? mobs : [],
       player: { pos: [p.pos.x, p.pos.y, p.pos.z], yaw: p.yaw, pitch: p.pitch, health: p.health, food: p.food, saturation: p.saturation, xp: p.xp, level: p.level, inventory: p.inventory, armor: p.armor, selected: p.selected, mode: p.mode, dim: this.dim, spawnPoint: p.spawnPoint, flying: p.flying },
     };
@@ -571,6 +573,14 @@ class Game {
     e.pickupDelay = 1.5;
     this.addEntity(e);
   }
+  spawnXP(x, y, z, amount) {
+    amount = Math.round(amount);
+    while (amount > 0) {
+      const v = amount >= 17 ? 17 : amount >= 7 ? 7 : amount >= 3 ? 3 : 1;
+      amount -= v;
+      this.addEntity(new XPOrb(this, x, y, z, v));
+    }
+  }
   spawnFallingBlock(x, y, z, id) { this.world.setBlock(x, y, z, 0, 0, { noUpdate: false }); this.addEntity(new FallingBlock(this, x, y, z, id)); }
   dropBlockItems(x, y, z, id) { this.dropsFor(id, true).forEach((s) => this.spawnItem(x + 0.5, y + 0.3, z + 0.5, s)); }
   dropTileItems(x, y, z, items) { for (const s of items) if (s) this.spawnItem(x + 0.5, y + 0.5, z + 0.5, s, true); }
@@ -600,7 +610,7 @@ class Game {
     if (this.player.mode === 'survival') {
       for (const s of this.dropsFor(id, canHarvest)) this.spawnItem(x + 0.5, y + 0.3, z + 0.5, s);
       const xp = { coal_ore: 1, diamond_ore: 5, emerald_ore: 5, lapis_ore: 3, redstone_ore: 2, nether_quartz_ore: 2, nether_gold_ore: 1 }[b.name];
-      if (xp && canHarvest) this.player.addXP(xp);
+      if (xp && canHarvest) this.spawnXP(x + 0.5, y + 0.5, z + 0.5, xp);
       this.stats.broken++;
       if (b.name.endsWith('_log')) this.achieve('¡Consigue madera!');
       if (b.name === 'diamond_ore' && canHarvest) this.achieve('¡Diamantes!');
@@ -665,9 +675,63 @@ class Game {
       if (type === 'chest' && this.dim === 'overworld' && this.world.gen.stronghold && Math.abs(x - this.world.gen.stronghold.x) < 8 && Math.abs(z - this.world.gen.stronghold.z) < 8 && !this.world.tiles.has(k)) {
         t.items[3] = { id: I.ender_pearl, count: 2, dmg: 0 }; t.items[7] = { id: I.iron_ingot, count: 4, dmg: 0 }; t.items[12] = { id: I.bread, count: 3, dmg: 0 }; t.items[20] = { id: I.blaze_rod, count: 1, dmg: 0 };
       }
+      if (type === 'chest' && !this.world.tiles.has(k) && (this.world.getMeta(x, y, z) & 4)) this.fillLoot(t.items);
       this.world.tiles.set(k, t);
     }
     return t;
+  }
+
+  fillLoot(items) {
+    const table = [
+      ['bread', 1, 4, 0.6], ['wheat', 2, 6, 0.4], ['iron_ingot', 1, 4, 0.45], ['gold_ingot', 1, 3, 0.3], ['diamond', 1, 2, 0.1],
+      ['emerald', 1, 3, 0.15], ['coal', 3, 10, 0.5], ['bone', 2, 6, 0.4], ['rotten_flesh', 1, 6, 0.4], ['string', 1, 4, 0.3],
+      ['gunpowder', 1, 4, 0.3], ['redstone', 2, 6, 0.3], ['apple', 1, 3, 0.4], ['saddle', 1, 1, 0.15], ['golden_apple', 1, 1, 0.05],
+      ['iron_pickaxe', 1, 1, 0.08], ['bucket', 1, 1, 0.15], ['wheat_seeds', 2, 5, 0.4], ['book', 1, 3, 0.2], ['ender_pearl', 1, 1, 0.08],
+    ];
+    for (const [name, a, b, p] of table) {
+      if (Math.random() > p) continue;
+      let slot = Math.floor(Math.random() * 27); let tries = 0;
+      while (items[slot] && tries++ < 30) slot = Math.floor(Math.random() * 27);
+      items[slot] = { id: I[name], count: a + Math.floor(Math.random() * (b - a + 1)), dmg: 0 };
+    }
+  }
+
+  // Mob spawners from dungeons and villages populating themselves
+  structureTick() {
+    const p = this.player, w = this.world;
+    if (!p || this.dim !== 'overworld') return;
+    // spawners
+    for (const k of w.spawners) {
+      const [x, y, z] = k.split(',').map(Number);
+      if (w.getBlock(x, y, z) !== B.spawner) { w.spawners.delete(k); continue; }
+      const d = Math.hypot(x + 0.5 - p.pos.x, y - p.pos.y, z + 0.5 - p.pos.z);
+      if (d > 16) continue;
+      this.particles.spawn(x + Math.random(), y + Math.random(), z + Math.random(), new THREE.Color(0xff7a20), new THREE.Vector3(0, 0.6, 0), 0.5, 0.06, 0);
+      if (this.difficulty === 'peaceful' || Math.random() > 0.08) continue;
+      const near = this.entities.filter((e) => e instanceof Mob && !e.dead && e.pos.distanceTo(new THREE.Vector3(x, y, z)) < 9).length;
+      if (near >= 5) continue;
+      const type = ['zombie', 'skeleton', 'spider'][(w.getMeta(x, y, z) || 1) - 1] ?? 'zombie';
+      for (let i = 0; i < 4; i++) {
+        const sx = x + Math.floor((Math.random() - 0.5) * 7), sz = z + Math.floor((Math.random() - 0.5) * 7);
+        if (!w.getBlock(sx, y, sz) && !w.getBlock(sx, y + 1, sz) && SOLID[w.getBlock(sx, y - 1, sz)]) { this.spawnMob(type, sx + 0.5, y, sz + 0.5); this.particles.burst(sx + 0.5, y + 0.5, sz + 0.5, 0x606060); break; }
+      }
+    }
+    // villages: populate the first time the player comes close
+    for (const v of w.gen.villagesNear(p.pos.x, p.pos.z)) {
+      if (this.villagesSpawned.has(v.id) || Math.hypot(v.x - p.pos.x, v.z - p.pos.z) > 70) continue;
+      if (!w.isLoaded(v.x, v.z)) continue;
+      this.villagesSpawned.add(v.id);
+      const count = 3 + v.buildings.filter((b) => b.kind !== 'farm').length;
+      for (let i = 0; i < count; i++) {
+        const b = v.buildings[i % v.buildings.length];
+        const sx = Math.floor((b.x + v.x) / 2) + (i % 3) - 1, sz = Math.floor((b.z + v.z) / 2);
+        const sy = w.surfaceY(sx, sz);
+        if (sy > 0) this.spawnMob('villager', sx + 0.5, sy + 1, sz + 0.5, { baby: Math.random() < 0.2 });
+      }
+      const gy = w.surfaceY(v.x + 4, v.z + 4);
+      if (gy > 0) this.spawnMob('iron_golem', v.x + 4.5, gy + 1, v.z + 4.5);
+      this.achieve('¡Una aldea!');
+    }
   }
 
   tickFurnaces() {
@@ -1041,7 +1105,14 @@ class Game {
       case 'difficulty': if (['peaceful', 'easy', 'normal', 'hard'].includes(args[0])) { this.options.difficulty = args[0]; this.saveOptions(); this.chat('Dificultad: ' + args[0]); } else this.chat('Uso: /difficulty <peaceful|easy|normal|hard>'); break;
       case 'xp': { const n = Number(args[0]) || 0; if (String(args[0]).endsWith('L')) for (let i = 0; i < parseInt(args[0], 10); i++) p.addXP(xpForLevelLocal(p.level)); else p.addXP(n); this.chat('Experiencia añadida'); break; }
       case 'spawnpoint': p.spawnPoint = { x: Math.floor(p.pos.x), y: Math.floor(p.pos.y), z: Math.floor(p.pos.z) }; this.worldSpawn = p.spawnPoint; this.chat('Punto de reaparición establecido'); break;
-      case 'locate': { const s = this.world.gen.stronghold; this.chat(this.dim === 'overworld' ? `Fortaleza más cercana en ${s.x}, ~, ${s.z}` : 'Solo en el mundo normal'); break; }
+      case 'locate': {
+        if (this.dim !== 'overworld') { this.chat('Solo en el mundo normal'); break; }
+        if (args[0] === 'village' || args[0] === 'aldea') {
+          const vs = this.world.gen.villagesNear(p.pos.x, p.pos.z, 3).sort((a, b) => Math.hypot(a.x - p.pos.x, a.z - p.pos.z) - Math.hypot(b.x - p.pos.x, b.z - p.pos.z));
+          this.chat(vs.length ? `Aldea más cercana en ${vs[0].x}, ${vs[0].h}, ${vs[0].z}` : 'No hay aldeas cerca');
+        } else { const s = this.world.gen.stronghold; this.chat(`Fortaleza más cercana en ${s.x}, ~, ${s.z} (usa /locate village para aldeas)`); }
+        break;
+      }
       case 'clear': p.inventory.fill(null); this.ui.refresh(); this.chat('Inventario vaciado'); break;
       case 'gamerule': if (args[0] === 'keepInventory') { this.keepInventory = args[1] === 'true'; this.chat('keepInventory = ' + this.keepInventory); } else this.chat('Reglas: keepInventory'); break;
       case 'setblock': {
@@ -1350,14 +1421,14 @@ class Game {
     this.time++;
     this.world.tick();
     if (this.world.tickCount % 2 === 0) this.tickFurnaces();
-    if (this.world.tickCount % 20 === 0 && this.player && !this.player.dead) this.spawnTick();
+    if (this.world.tickCount % 20 === 0 && this.player && !this.player.dead) { this.spawnTick(); this.structureTick(); }
   }
 
   loop(now) {
     requestAnimationFrame((t) => this.loop(t));
     let dt = (now - this.last) / 1000;
     this.last = now;
-    if (dt > 0.1) dt = 0.1;
+    if (dt > 0.25) dt = 0.25; // keep the simulation real-time on slow devices (physics is sub-stepped)
     this.frames++; this.fpsTime += dt;
     if (this.fpsTime >= 1) { this.fps = this.frames; this.frames = 0; this.fpsTime = 0; }
     if (!this.world) return;
@@ -1551,7 +1622,7 @@ function drawLogo(c) {
 
 // ---------------------------------------------------------------- storage helpers
 function loadOptions() {
-  const def = { fov: 70, renderDistance: IS_TOUCH ? 4 : 6, sensitivity: 100, volume: 60, guiScale: IS_TOUCH ? (Math.min(innerWidth, innerHeight) < 500 ? 1.5 : 2) : 2, difficulty: 'normal', bobbing: true, clouds: !IS_TOUCH, shaders: false };
+  const def = { fov: 70, renderDistance: IS_TOUCH ? 4 : 6, sensitivity: 100, volume: 60, guiScale: IS_TOUCH ? (Math.min(innerWidth, innerHeight) < 500 ? 1.5 : 2) : 2, difficulty: 'normal', bobbing: true, clouds: !IS_TOUCH, shaders: false, fancy: !IS_TOUCH };
   try { return { ...def, ...JSON.parse(localStorage.getItem('mc_options') || '{}') }; } catch { return def; }
 }
 function listWorlds() { try { return JSON.parse(localStorage.getItem('mc_worlds') || '[]').sort((a, b) => b.lastPlayed - a.lastPlayed); } catch { return []; } }
