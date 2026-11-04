@@ -24,6 +24,18 @@ export const BIOMES = [
   { name: 'Pantano', grass: 0x6a7039, foliage: 0x6a7039, water: 0x617b64 },         // 11
   { name: 'Páramos del Nether', grass: 0xbfb755, foliage: 0xaea42a, water: 0x3f76e4 }, // 12
   { name: 'El End', grass: 0x8eb971, foliage: 0x71a74d, water: 0x3f76e4 },          // 13
+  { name: 'Bosque oscuro', grass: 0x507a32, foliage: 0x59ae30, water: 0x3f76e4 },  // 14
+  { name: 'Arboleda de cerezos', grass: 0xb6db61, foliage: 0xb6db61, water: 0x5db7ef }, // 15
+  { name: 'Campos de hongos', grass: 0x55c93f, foliage: 0x2bbb0f, water: 0x3f76e4 }, // 16
+  { name: 'Badlands', grass: 0x90814d, foliage: 0x9e814d, water: 0x3f76e4 },       // 17
+  { name: 'Manglar', grass: 0x6a7039, foliage: 0x8db127, water: 0x3a7a6a },        // 18
+  { name: 'Picos de hielo', grass: 0x80b497, foliage: 0x60a17b, water: 0x3d57d6 }, // 19
+  { name: 'Océano cálido', grass: 0x8eb971, foliage: 0x71a74d, water: 0x43d5ee },  // 20
+  { name: 'Océano helado', grass: 0x80b497, foliage: 0x60a17b, water: 0x3938c9 },  // 21
+  { name: 'Bosque carmesí', grass: 0, foliage: 0, water: 0x3f76e4 },               // 22
+  { name: 'Bosque distorsionado', grass: 0, foliage: 0, water: 0x3f76e4 },         // 23
+  { name: 'Valle de almas', grass: 0, foliage: 0, water: 0x3f76e4 },               // 24
+  { name: 'Deltas de basalto', grass: 0, foliage: 0, water: 0x3f76e4 },            // 25
 ];
 
 export class Generator {
@@ -60,16 +72,23 @@ export class Generator {
     h += m;
     if (hum > 0.35 && t > -0.1 && h > 61 && h < 68 && m < 4) h = 62 + (h - 62) * 0.3; // swamp flats
     h = Math.floor(Math.min(CH - 8, Math.max(8, h)));
+    const variant = this.n2.fbm2(x / 900 + 300, z / 900 - 200, 2);
+    // mushroom islands rise out of deep ocean
+    if (c < -0.38 && variant > 0.42) { h = Math.floor(64 + (variant - 0.42) * 40 + detail * 3); return { h, biome: 16, t }; }
+    // badlands plateaus with terraces
+    if (t > 0.42 && hum < -0.2 && h >= SEA + 2) { const plat = Math.max(0, this.n3.fbm2(x / 160, z / 160, 3) + 0.2) * 40; h = Math.floor(Math.min(CH - 10, h + Math.floor(plat / 4) * 4)); return { h, biome: 17, t }; }
     let biome;
-    if (h < SEA - 1) biome = 0;
+    if (h < SEA - 1) biome = t > 0.4 ? 20 : t < -0.4 ? 21 : 0;
     else if (h <= SEA + 1 && t > -0.45) biome = 1;
     else if (m > 18) biome = 8;
-    else if (t < -0.45) biome = 7;
+    else if (t < -0.45) biome = variant > 0.35 ? 19 : 7;
+    else if (m > 5 && t > -0.15 && t < 0.25 && hum < 0.15) biome = 15;
     else if (t < -0.2) biome = 5;
     else if (t > 0.38 && hum < 0.05) biome = 6;
     else if (t > 0.3 && hum > 0.25) biome = 9;
     else if (t > 0.3) biome = 10;
-    else if (hum > 0.35 && h < 66) biome = 11;
+    else if (hum > 0.35 && h < 66) biome = t > 0.22 ? 18 : 11;
+    else if (hum > 0.3 && variant > 0.15) biome = 14;
     else if (hum > 0.1) biome = 3;
     else if (hum < -0.25) biome = 2;
     else if (hum < 0) biome = 4;
@@ -105,9 +124,15 @@ export class Generator {
       for (let y = 0; y <= Math.max(h, SEA); y++) {
         let id = 0;
         if (y === 0 || (y < 4 && r * 4 > y)) id = B.bedrock;
-        else if (y < h - 4) id = B.stone;
-        else if (y < h) {
+        else if (y < h - 4) id = y < 12 + Math.floor(r * 4) ? B.deepslate : B.stone;
+        else if (biome === 17 && y <= h) {
+          // badlands: red sand on top, coloured terracotta bands below
+          const bands = [B.terracotta, B.orange_terracotta, B.terracotta, B.yellow_terracotta, B.red_terracotta, B.terracotta, B.brown_terracotta, B.white_terracotta, B.light_gray_terracotta, B.terracotta];
+          id = y === h ? (h > 85 ? B.terracotta : B.red_sand) : y > h - 2 && h <= 85 ? B.red_sandstone : bands[((y + Math.floor(this.n5.noise2(x / 60, z / 60) * 2)) % bands.length + bands.length) % bands.length];
+        } else if (y < h) {
           if (biome === 6 || biome === 1) id = y < h - 2 ? B.sandstone : B.sand;
+          else if (biome === 18) id = B.mud;
+          else if (biome === 20) id = B.sand;
           else if (biome === 0) id = B.sand;
           else if (biome === 8 && h > 95) id = B.stone;
           else id = B.dirt;
@@ -115,15 +140,19 @@ export class Generator {
           if (biome === 6 || biome === 1) id = B.sand;
           else if (biome === 0) id = r < 0.3 ? B.gravel : r < 0.4 ? B.clay : B.sand;
           else if (biome === 8 && h > 100) id = h > 110 ? B.snow_block : B.stone;
-          else if (biome === 7) id = B.snowy_grass;
+          else if (biome === 7 || biome === 19) id = biome === 19 && r < 0.3 ? B.packed_ice : B.snowy_grass;
+          else if (biome === 16) id = B.mycelium;
+          else if (biome === 18) id = h < SEA ? B.mud : (r < 0.5 ? B.mud : B.grass_block);
+          else if (biome === 20) id = r < 0.12 ? [B.tube_coral_block, B.brain_coral_block, B.fire_coral_block, B.horn_coral_block][Math.floor(r * 33) % 4] : B.sand;
+          else if (biome === 21) id = B.gravel;
           else if (biome === 5 && r < 0.25) id = B.podzol;
           else id = h < SEA ? B.dirt : B.grass_block;
         } else if (y <= SEA) {
-          id = (biome === 7 && y === SEA) ? B.ice : B.water;
+          id = ((biome === 7 || biome === 19 || biome === 21) && y === SEA) ? (biome === 21 && r < 0.1 ? B.packed_ice : B.ice) : B.water;
         }
         data[idx(x, y, z)] = id;
       }
-      if (biome === 7 && h >= SEA) data[idx(x, h + 1, z)] = B.snow;
+      if ((biome === 7 || biome === 19) && h >= SEA) data[idx(x, h + 1, z)] = B.snow;
     }
     // caves
     for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
@@ -162,6 +191,21 @@ export class Generator {
     vein(B.coal_ore, 18, 12, 5, 128); vein(B.iron_ore, 14, 8, 1, 64); vein(B.copper_ore, 8, 9, 20, 96);
     vein(B.gold_ore, 3, 7, 1, 32); vein(B.redstone_ore, 7, 7, 1, 16); vein(B.lapis_ore, 2, 6, 1, 32);
     vein(B.diamond_ore, 2, 6, 1, 16);
+    vein(B.deepslate_diamond_ore, 2, 6, 1, 14, B.deepslate); vein(B.deepslate_iron_ore, 4, 8, 1, 14, B.deepslate);
+    vein(B.deepslate_gold_ore, 2, 7, 1, 14, B.deepslate); vein(B.deepslate_redstone_ore, 4, 7, 1, 14, B.deepslate); vein(B.deepslate_lapis_ore, 1, 6, 1, 14, B.deepslate);
+    if (biomes[0] === 17) vein(B.gold_ore, 6, 8, 30, 80);
+    // amethyst geode
+    if (rng() < 0.03) {
+      const gx = 4 + ((rng() * 8) | 0), gy = 15 + ((rng() * 20) | 0), gz = 4 + ((rng() * 8) | 0);
+      for (let dx = -5; dx <= 5; dx++) for (let dy = -5; dy <= 5; dy++) for (let dz = -5; dz <= 5; dz++) {
+        const x = gx + dx, y = gy + dy, z = gz + dz;
+        if (x < 0 || x > 15 || z < 0 || z > 15 || y < 2) continue;
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (d > 5) continue;
+        data[idx(x, y, z)] = d > 4.3 ? B.smooth_basalt : d > 3.6 ? B.calcite : d > 2.8 ? B.amethyst_block : 0;
+        if (d <= 2.8 && d > 2 && rng() < 0.15) data[idx(x, y, z)] = B.amethyst_cluster;
+      }
+    }
     if (biomes[0] === 8) vein(B.emerald_ore, 4, 1, 4, 32);
     // features (trees etc) from this and neighbouring chunks
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) this.featuresOverworld(cx + dx, cz + dz, cx, cz, data);
@@ -192,13 +236,20 @@ export class Generator {
       const { h, biome } = this.heightInfo(wx, wz);
       if (h < SEA) continue;
       const y = h + 1;
-      const treeChance = { 2: 0.03, 3: 0.35, 4: 0.35, 5: 0.32, 7: 0.04, 8: 0.08, 9: 0.6, 10: 0.04, 11: 0.12 }[biome] ?? 0;
+      if (biome === 16) { if (roll < 0.02) this.hugeMushroom(wx, y, wz, roll2 < 0.5, rng, set); else if (roll < 0.1) set(wx, y, wz, roll2 < 0.5 ? B.red_mushroom : B.brown_mushroom); continue; }
+      if (biome === 19) { if (roll < 0.05) { const hh = 6 + ((rng() * 18) | 0); for (let k = 0; k < hh; k++) { const r = Math.max(0, Math.round((1 - k / hh) * 2)); for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) if (dx * dx + dz * dz <= r * r) set(wx + dx, y + k, wz + dz, B.packed_ice, true); } } continue; }
+      if (biome === 17) { if (roll < 0.04) set(wx, y, wz, B.dead_bush); else if (roll < 0.06) { for (let k = 0; k < 2; k++) set(wx, y + k, wz, B.cactus); } continue; }
+      if (biome === 20 || biome === 21) continue;
+      const treeChance = { 2: 0.03, 3: 0.35, 4: 0.35, 5: 0.32, 7: 0.04, 8: 0.08, 9: 0.6, 10: 0.04, 11: 0.12, 14: 0.7, 15: 0.2, 18: 0.4 }[biome] ?? 0;
       if (roll < treeChance && biome !== 6 && biome !== 1) {
         let kind = 'oak';
         if (biome === 4 || (biome === 3 && roll2 < 0.2)) kind = 'birch';
         if (biome === 5 || biome === 7 || biome === 8) kind = 'spruce';
         if (biome === 9) kind = roll2 < 0.6 ? 'jungle' : 'oak';
         if (biome === 10) kind = 'acacia';
+        if (biome === 14) { if (roll2 < 0.08) { this.hugeMushroom(wx, y, wz, roll2 < 0.04, rng, set); continue; } kind = roll2 < 0.85 ? 'dark_oak' : 'birch'; }
+        if (biome === 15) kind = 'cherry';
+        if (biome === 18) kind = 'mangrove';
         this.tree(kind, wx, y, wz, rng, set);
         continue;
       }
@@ -208,6 +259,7 @@ export class Generator {
         continue;
       }
       if (biome === 1 || biome === 0) continue;
+      if ((biome === 5 || biome === 3) && roll > 0.97) { set(wx, y, wz, B.sweet_berry_bush); continue; }
       if (roll < 0.55) set(wx, y, wz, biome === 5 && roll2 < 0.5 ? B.fern : B.short_grass);
       else if (roll < 0.6) {
         const flowers = biome === 11 ? [B.blue_orchid] : [B.dandelion, B.poppy, B.cornflower, B.oxeye_daisy, B.allium];
@@ -224,7 +276,57 @@ export class Generator {
     }
   }
 
+  hugeMushroom(x, y, z, red, rng, set) {
+    const h = 5 + ((rng() * 3) | 0);
+    for (let k = 0; k < h; k++) set(x, y + k, z, B.mushroom_stem, true);
+    const cap = red ? B.red_mushroom_block : B.brown_mushroom_block;
+    if (red) {
+      for (let dy = h - 3; dy <= h; dy++) for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
+        const edge = Math.abs(dx) === 2 || Math.abs(dz) === 2;
+        if (dy === h && edge) continue;
+        if (dy < h && !edge) continue;
+        if (Math.abs(dx) === 2 && Math.abs(dz) === 2) continue;
+        set(x + dx, y + dy, z + dz, cap);
+      }
+    } else for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) if (!(Math.abs(dx) === 3 && Math.abs(dz) === 3)) set(x + dx, y + h, z + dz, cap);
+  }
+
   tree(kind, x, y, z, rng, set) {
+    if (kind === 'dark_oak') {
+      const L = B.dark_oak_leaves, W = B.dark_oak_log, h = 6 + ((rng() * 3) | 0);
+      for (let k = 0; k < h; k++) for (const [dx, dz] of [[0, 0], [1, 0], [0, 1], [1, 1]]) set(x + dx, y + k, z + dz, W, true);
+      for (let dy = h - 2; dy <= h + 1; dy++) {
+        const r = dy > h ? 2 : 3;
+        for (let dx = -r; dx <= r + 1; dx++) for (let dz = -r; dz <= r + 1; dz++) {
+          if ((dx === -r || dx === r + 1) && (dz === -r || dz === r + 1)) continue;
+          if (rng() < 0.08) continue;
+          set(x + dx, y + dy, z + dz, L);
+        }
+      }
+      return;
+    }
+    if (kind === 'cherry') {
+      const L = B.cherry_leaves, W = B.cherry_log, h = 5 + ((rng() * 2) | 0);
+      for (let k = 0; k < h; k++) set(x, y + k, z, W, true);
+      const branches = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(() => rng() < 0.6);
+      if (!branches.length) branches.push([1, 0]);
+      for (const [bx, bz] of branches) {
+        let cx = x, cy = y + h - 2, cz = z;
+        for (let k = 0; k < 3; k++) { cx += bx; cz += bz; if (k) cy++; set(cx, cy, cz, W, true); }
+        for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) for (let dy = -1; dy <= 1; dy++) {
+          if (dx * dx + dz * dz + dy * dy * 3 > 10) continue;
+          set(cx + dx, cy + 1 + dy, cz + dz, L);
+        }
+      }
+      return;
+    }
+    if (kind === 'mangrove') {
+      const L = B.mangrove_leaves, W = B.mangrove_log, h = 5 + ((rng() * 3) | 0);
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1]]) for (let k = -2; k < 2; k++) set(x + dx, y + k, z + dz, B.mangrove_roots, true);
+      for (let k = 1; k < h + 1; k++) set(x, y + k, z, W, true);
+      for (let dy = h - 1; dy <= h + 2; dy++) { const r = dy > h + 1 ? 1 : 2; for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) if (!(Math.abs(dx) === r && Math.abs(dz) === r && rng() < 0.6)) set(x + dx, y + dy, z + dz, L); }
+      return;
+    }
     const L = B[kind + '_leaves'], W = B[kind + '_log'];
     if (kind === 'spruce') {
       const h = 6 + ((rng() * 4) | 0);
@@ -467,10 +569,12 @@ export class Generator {
   // ------------------------------------------------------------ nether
   genNether(cx, cz, data, biomes) {
     const x0 = cx * CS, z0 = cz * CS;
-    biomes.fill(12);
     for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
       const wx = x0 + x, wz = z0 + z;
-      const soul = this.n3.fbm2(wx / 90, wz / 90, 2) > 0.35;
+      const bn = this.n3.fbm2(wx / 140, wz / 140, 2), bn2 = this.n4.fbm2(wx / 140 + 50, wz / 140, 2);
+      const nb = bn > 0.3 ? 24 : bn < -0.3 ? 25 : bn2 > 0.25 ? 22 : bn2 < -0.25 ? 23 : 12;
+      biomes[x | (z << 4)] = nb;
+      const soul = nb === 24;
       for (let y = 0; y < CH; y++) {
         let id = 0;
         if (y === 0 || y === CH - 1 || (y < 4 && hash3(this.seed, wx, y, wz) < 0.5) || (y > CH - 5 && hash3(this.seed, wx, y, wz) < 0.5)) id = B.bedrock;
@@ -488,7 +592,11 @@ export class Generator {
         const i = idx(x, y, z);
         if (data[i] === B.netherrack && data[idx(x, y + 1, z)] === 0) {
           const r = hash3(this.seed, wx, y, wz);
-          if (soul) data[i] = r < 0.5 ? B.soul_sand : B.soul_soil;
+          const nb = biomes[x | (z << 4)];
+          if (soul) { data[i] = r < 0.5 ? B.soul_sand : B.soul_soil; if (r < 0.01 && y > 32) for (let k = 1; k < 6; k++) if (y + k < CH - 1 && !data[idx(x, y + k, z)]) data[idx(x, y + k, z)] = B.bone_block; }
+          else if (nb === 22 && y > 31) { data[i] = B.crimson_nylium; const above = idx(x, y + 1, z); if (r < 0.15) data[above] = B.crimson_roots; else if (r < 0.2) data[above] = B.crimson_fungus; else if (r < 0.215) this.netherTree(data, x, y + 1, z, false); }
+          else if (nb === 23 && y > 31) { data[i] = B.warped_nylium; const above = idx(x, y + 1, z); if (r < 0.15) data[above] = B.warped_roots; else if (r < 0.2) data[above] = B.warped_fungus; else if (r < 0.215) this.netherTree(data, x, y + 1, z, true); }
+          else if (nb === 25) data[i] = r < 0.55 ? B.basalt : r < 0.85 ? B.blackstone : B.magma_block;
           else if (r < 0.04 && y > 31) data[i] = B.crimson_nylium;
           if (y === 31 || y === 32) if (r < 0.15) data[i] = B.magma_block;
         }
@@ -526,6 +634,20 @@ export class Generator {
     }
   }
 
+  netherTree(data, x, y, z, warped) {
+    const h = 4 + ((hash3(this.seed, x, y, z) * 6) | 0);
+    const stem = warped ? B.warped_stem : B.crimson_stem, wart = warped ? B.warped_wart_block : B.nether_wart_block;
+    for (let k = 0; k < h; k++) if (y + k < CH - 2) data[idx(x, y + k, z)] = stem;
+    for (let dy = h - 3; dy <= h; dy++) for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
+      const xx = x + dx, zz = z + dz, yy = y + dy;
+      if (xx < 0 || xx > 15 || zz < 0 || zz > 15 || yy >= CH - 1) continue;
+      const r = Math.abs(dx) + Math.abs(dz);
+      if (r > (dy === h ? 1 : 3)) continue;
+      if (data[idx(xx, yy, zz)]) continue;
+      data[idx(xx, yy, zz)] = hash3(this.seed + 3, xx, yy, zz) < 0.08 ? B.shroomlight : wart;
+    }
+  }
+
   // ------------------------------------------------------------ end
   genEnd(cx, cz, data, biomes) {
     const x0 = cx * CS, z0 = cz * CS;
@@ -546,6 +668,7 @@ export class Generator {
         if (n > 0.25) { top = Math.floor(55 + (n - 0.25) * 30); bot = Math.floor(55 - (n - 0.25) * 60); }
       }
       for (let y = bot; y <= top && top > 0; y++) data[idx(x, y, z)] = B.end_stone;
+      if (d > 700 && top > 0 && hash3(this.seed, wx, 7, wz) < 0.006) { const hh = 3 + ((hash3(this.seed, wx, 8, wz) * 6) | 0); for (let k = 1; k <= hh; k++) data[idx(x, top + k, z)] = k === hh ? B.chorus_flower : B.chorus_plant; }
     }
     // obsidian pillars
     for (let p = 0; p < 10; p++) {

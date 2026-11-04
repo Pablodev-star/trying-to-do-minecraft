@@ -246,6 +246,54 @@ block('rail', 'Raíl', { tex: 'rail', render: 'box', shape: 'rail', pass: 'cutou
 block('powered_rail', 'Raíl propulsor', { tex: 'powered_rail', render: 'box', shape: 'rail', pass: 'cutout', solid: false, opaque: false, hardness: 0.7, tool: 'pickaxe' });
 block('detector_rail', 'Raíl detector', { tex: 'detector_rail', render: 'box', shape: 'rail', pass: 'cutout', solid: false, opaque: false, hardness: 0.7, tool: 'pickaxe' });
 block('activator_rail', 'Raíl activador', { tex: 'activator_rail', render: 'box', shape: 'rail', pass: 'cutout', solid: false, opaque: false, hardness: 0.7, tool: 'pickaxe' });
+// New biome blocks
+for (const [w, n, leafTint] of [['dark_oak', 'roble oscuro', 'foliage_dark_oak'], ['cherry', 'cerezo', null], ['mangrove', 'mangle', 'foliage_mangrove']]) {
+  block(`${w}_planks`, `Tablones de ${n}`, { hardness: 2, tool: 'axe', flammable: true, sound: 'wood' });
+  block(`${w}_log`, `Tronco de ${n}`, { tex: T(`${w}_log_top`, `${w}_log`), hardness: 2, tool: 'axe', flammable: true, sound: 'wood' });
+  block(`${w}_leaves`, `Hojas de ${n}`, { hardness: 0.2, tool: 'hoe', pass: 'cutout', opaque: false, tint: leafTint ?? undefined, flammable: true, sound: 'grass', drops: () => (Math.random() < 0.05 ? [[`${w}_sapling`, 1]] : Math.random() < 0.02 ? [['stick', 1]] : []) });
+  block(`${w}_sapling`, `Brote de ${n}`, { render: 'cross', hardness: 0, sound: 'grass' });
+}
+block('mangrove_roots', 'Raíces de mangle', { render: 'cube', pass: 'cutout', opaque: false, hardness: 0.7, tool: 'axe', sound: 'wood' });
+block('mud', 'Barro', { hardness: 0.5, tool: 'shovel', sound: 'sand', slow: 0.2 });
+block('mud_bricks', 'Ladrillos de barro', { hardness: 1.5, tool: 'pickaxe' });
+block('mycelium', 'Micelio', { tex: T('mycelium_top', 'mycelium_side', 'dirt'), hardness: 0.6, tool: 'shovel', drops: 'dirt', sound: 'grass' });
+block('red_mushroom_block', 'Bloque de champiñón rojo', { hardness: 0.2, tool: 'axe', drops: () => (Math.random() < 0.15 ? [['red_mushroom', 1]] : []), sound: 'wood' });
+block('brown_mushroom_block', 'Bloque de champiñón marrón', { hardness: 0.2, tool: 'axe', drops: () => (Math.random() < 0.15 ? [['brown_mushroom', 1]] : []), sound: 'wood' });
+block('mushroom_stem', 'Tallo de champiñón', { hardness: 0.2, tool: 'axe', drops: null, sound: 'wood' });
+block('red_sandstone', 'Arenisca roja', { tex: T('red_sandstone_top', 'red_sandstone'), hardness: 0.8, tool: 'pickaxe', needsTool: true });
+for (const [c, n] of [['white', 'blanca'], ['orange', 'naranja'], ['yellow', 'amarilla'], ['red', 'roja'], ['brown', 'marrón'], ['light_gray', 'gris claro']]) block(`${c}_terracotta`, `Terracota ${n}`, { hardness: 1.25, tool: 'pickaxe', needsTool: true });
+block('blue_ice', 'Hielo azul', { hardness: 2.8, tool: 'pickaxe', drops: null, sound: 'glass' });
+for (const [c, n] of [['tube', 'tubo'], ['brain', 'cerebro'], ['fire', 'fuego'], ['horn', 'cuerno']]) block(`${c}_coral_block`, `Bloque de coral de ${n}`, { hardness: 1.5, tool: 'pickaxe', needsTool: true });
+block('sweet_berry_bush', 'Arbusto de bayas dulces', { render: 'cross', hardness: 0, solid: false, slow: 0.5, drops: () => [['sweet_berries', 1 + Math.floor(Math.random() * 2)]], sound: 'grass' });
+block('crimson_stem', 'Tallo carmesí', { tex: T('crimson_stem_top', 'crimson_stem'), hardness: 2, tool: 'axe', sound: 'wood' });
+block('warped_stem', 'Tallo distorsionado', { tex: T('warped_stem_top', 'warped_stem'), hardness: 2, tool: 'axe', sound: 'wood' });
+block('crimson_planks', 'Tablones carmesí', { hardness: 2, tool: 'axe', sound: 'wood' });
+block('warped_planks', 'Tablones distorsionados', { hardness: 2, tool: 'axe', sound: 'wood' });
+block('warped_nylium', 'Necilio distorsionado', { tex: T('warped_nylium', 'warped_nylium_side', 'netherrack'), hardness: 0.4, tool: 'pickaxe', needsTool: true, drops: 'netherrack' });
+block('warped_wart_block', 'Bloque de verruga distorsionada', { hardness: 1, tool: 'hoe', sound: 'wood' });
+block('crimson_fungus', 'Hongo carmesí', { render: 'cross', hardness: 0, sound: 'grass' });
+block('warped_fungus', 'Hongo distorsionado', { render: 'cross', hardness: 0, sound: 'grass' });
+block('crimson_roots', 'Raíces carmesí', { render: 'cross', hardness: 0, replaceable: true, drops: null, sound: 'grass' });
+block('warped_roots', 'Raíces distorsionadas', { render: 'cross', hardness: 0, replaceable: true, drops: null, sound: 'grass' });
+block('bone_block', 'Bloque de hueso', { tex: T('bone_block_top', 'bone_block'), hardness: 2, tool: 'pickaxe', needsTool: true });
+block('end_rod', 'Vara del End', { tex: 'end_rod', render: 'box', box: [7, 0, 7, 9, 16, 9], opaque: false, solid: false, hardness: 0, light: 14 });
+block('chorus_plant', 'Planta de coro', { render: 'box', box: [3, 0, 3, 13, 16, 13], opaque: false, hardness: 0.4, tool: 'axe', drops: () => (Math.random() < 0.5 ? [['chorus_fruit', 1]] : []) });
+block('chorus_flower', 'Flor de coro', { hardness: 0.4, tool: 'axe' });
+block('purpur_pillar', 'Pilar de púrpur', { tex: T('purpur_pillar_top', 'purpur_pillar'), hardness: 1.5, tool: 'pickaxe', needsTool: true });
+block('gilded_blackstone', 'Piedra negra dorada', { hardness: 1.5, tool: 'pickaxe', needsTool: true, drops: () => [[Math.random() < 0.1 ? 'gold_nugget' : 'gilded_blackstone', Math.random() < 0.1 ? 2 + Math.floor(Math.random() * 4) : 1]] });
+block('polished_blackstone_bricks', 'Ladrillos de piedra negra pulida', { hardness: 1.5, tool: 'pickaxe', needsTool: true });
+block('cobbled_deepslate', 'Pizarra profunda rocosa', { hardness: 3.5, tool: 'pickaxe', needsTool: true });
+block('deepslate', 'Pizarra profunda', { tex: T('deepslate_top', 'deepslate'), hardness: 3, tool: 'pickaxe', needsTool: true, drops: 'cobbled_deepslate' });
+block('deepslate_diamond_ore', 'Mena de diamante de pizarra profunda', { hardness: 4.5, tool: 'pickaxe', needsTool: true, level: 2, drops: 'diamond' });
+block('deepslate_iron_ore', 'Mena de hierro de pizarra profunda', { hardness: 4.5, tool: 'pickaxe', needsTool: true, level: 1, drops: 'raw_iron' });
+block('deepslate_gold_ore', 'Mena de oro de pizarra profunda', { hardness: 4.5, tool: 'pickaxe', needsTool: true, level: 2, drops: 'raw_gold' });
+block('deepslate_redstone_ore', 'Mena de redstone de pizarra profunda', { hardness: 4.5, tool: 'pickaxe', needsTool: true, level: 2, drops: () => [['redstone', 4 + Math.floor(Math.random() * 2)]] });
+block('deepslate_lapis_ore', 'Mena de lapislázuli de pizarra profunda', { hardness: 4.5, tool: 'pickaxe', needsTool: true, level: 1, drops: () => [['lapis_lazuli', 4 + Math.floor(Math.random() * 6)]] });
+block('amethyst_block', 'Bloque de amatista', { hardness: 1.5, tool: 'pickaxe', sound: 'glass' });
+block('amethyst_cluster', 'Racimo de amatista', { render: 'cross', hardness: 1.5, tool: 'pickaxe', light: 5, drops: () => [['amethyst_shard', 4]], sound: 'glass' });
+block('calcite', 'Calcita', { hardness: 0.75, tool: 'pickaxe', needsTool: true });
+block('smooth_basalt', 'Basalto liso', { hardness: 1.25, tool: 'pickaxe', needsTool: true });
+block('sculk', 'Sculk', { hardness: 0.2, tool: 'hoe', sound: 'wool' });
 block('spawner', 'Generador de monstruos', { render: 'cube', pass: 'cutout', opaque: false, hardness: 5, tool: 'pickaxe', needsTool: true, drops: null, light: 0 });
 block('path', 'Camino de tierra', { tex: T('path_top', 'path_side', 'dirt'), render: 'box', box: [0, 0, 0, 16, 15, 16], pass: 'opaque', opaque: false, hardness: 0.65, tool: 'shovel', drops: 'dirt', sound: 'grass' });
 block('fire', 'Fuego', { render: 'cross', solid: false, opaque: false, hardness: 0, noItem: true, drops: null, light: 15, replaceable: true });
@@ -307,6 +355,16 @@ item('water_bucket', 'Cubo de agua', { stack: 1 });
 item('lava_bucket', 'Cubo de lava', { stack: 1 });
 item('milk_bucket', 'Cubo de leche', { stack: 1, food: [0, 0], milk: true });
 item('glass_bottle', 'Frasco de cristal');
+item('amethyst_shard', 'Fragmento de amatista');
+item('chorus_fruit', 'Fruta de coro', { food: [4, 2.4], chorus: true });
+item('popped_chorus_fruit', 'Fruta de coro reventada');
+item('wither_skeleton_skull', 'Cráneo de esqueleto wither', { stack: 64 });
+item('nether_star', 'Estrella del Nether');
+item('shulker_shell', 'Caparazón de shulker');
+item('prismarine_shard', 'Fragmento de prismarina');
+item('honeycomb', 'Panal');
+item('rabbit_hide', 'Piel de conejo');
+item('goat_horn', 'Cuerno de cabra', { stack: 1 });
 for (const [w, n] of [['oak', 'roble'], ['spruce', 'abeto'], ['birch', 'abedul'], ['jungle', 'jungla'], ['acacia', 'acacia']]) item(`${w}_boat`, `Barca de ${n}`, { stack: 1, boat: w });
 item('minecart', 'Vagoneta', { stack: 1 });
 item('fishing_rod', 'Caña de pescar', { kind: 'tool', stack: 1, toolType: 'rod', durability: 64, damage: 1 });
@@ -349,8 +407,8 @@ export function copyStack(s, count = s?.count) { return s ? { id: s.id, count, d
 
 // ---------------------------------------------------------------- recipes
 const TAGS = {
-  planks: ['oak_planks', 'spruce_planks', 'birch_planks', 'jungle_planks', 'acacia_planks'],
-  log: ['oak_log', 'spruce_log', 'birch_log', 'jungle_log', 'acacia_log'],
+  planks: ['oak_planks', 'spruce_planks', 'birch_planks', 'jungle_planks', 'acacia_planks', 'dark_oak_planks', 'cherry_planks', 'mangrove_planks', 'crimson_planks', 'warped_planks'],
+  log: ['oak_log', 'spruce_log', 'birch_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'cherry_log', 'mangrove_log'],
   wool: Object.keys(WOOL_COLORS).map((c) => c + '_wool'),
   coals: ['coal', 'charcoal'],
   stone_mat: ['cobblestone', 'blackstone'],
@@ -466,6 +524,14 @@ shaped('barrel', 1, ['psp', 'p p', 'psp'], { p: '#planks', s: 'oak_slab' });
 shaped('composter', 1, ['s s', 's s', 'sss'], { s: 'oak_slab' });
 shaped('lectern', 1, ['sss', ' b ', ' s '], { s: 'oak_slab', b: 'bookshelf' });
 shaped('glass_bottle', 3, ['g g', ' g '], { g: 'glass' });
+for (const w of ['dark_oak', 'cherry', 'mangrove']) shapeless(`${w}_planks`, 4, [`${w}_log`]);
+shapeless('crimson_planks', 4, ['crimson_stem']); shapeless('warped_planks', 4, ['warped_stem']);
+shaped('mud_bricks', 4, ['mm', 'mm'], { m: 'mud' });
+shaped('red_sandstone', 1, ['ss', 'ss'], { s: 'red_sand' });
+shaped('bone_block', 1, ['bbb', 'bbb', 'bbb'], { b: 'bone_meal' }); shapeless('bone_meal', 9, ['bone_block']);
+shaped('end_rod', 4, ['b', 'p'], { b: 'blaze_rod', p: 'popped_chorus_fruit' });
+shaped('amethyst_block', 1, ['aa', 'aa'], { a: 'amethyst_shard' });
+shaped('purpur_block', 4, ['pp', 'pp'], { p: 'popped_chorus_fruit' });
 for (const w of ['oak', 'spruce', 'birch', 'jungle', 'acacia']) shaped(`${w}_boat`, 1, ['p p', 'ppp'], { p: `${w}_planks` });
 shaped('minecart', 1, ['i i', 'iii'], { i: 'iron_ingot' });
 shaped('rail', 16, ['i i', 'isi', 'i i'], { i: 'iron_ingot', s: 'stick' });
@@ -548,6 +614,7 @@ export const SMELTING = {
   sand: 'glass', red_sand: 'glass', cobblestone: 'stone', stone: 'smooth_stone', clay_ball: 'brick', clay: 'terracotta', netherrack: 'nether_brick',
   oak_log: 'charcoal', spruce_log: 'charcoal', birch_log: 'charcoal', jungle_log: 'charcoal', acacia_log: 'charcoal',
   porkchop: 'cooked_porkchop', beef: 'cooked_beef', chicken: 'cooked_chicken', mutton: 'cooked_mutton', potato: 'baked_potato',
+  chorus_fruit: 'popped_chorus_fruit', cobbled_deepslate: 'deepslate', deepslate_diamond_ore: 'diamond', deepslate_iron_ore: 'iron_ingot', deepslate_gold_ore: 'gold_ingot', mud: 'mud_bricks',
   cod: 'cooked_cod', salmon: 'cooked_salmon', rabbit: 'cooked_rabbit', kelp: 'dried_kelp',
   nether_quartz_ore: 'quartz', diamond_ore: 'diamond', emerald_ore: 'emerald', coal_ore: 'coal', lapis_ore: 'lapis_lazuli', ancient_debris: 'netherite_scrap',
 };

@@ -508,6 +508,8 @@ export class World {
       if (kind === 'water') return hexRGB(bc.water);
       if (kind === 'grass' || kind === 'grass_top') return hexRGB(bc.grass);
       if (kind === 'foliage_spruce') return [0.38, 0.6, 0.38];
+      if (kind === 'foliage_dark_oak') return [0.33, 0.55, 0.2];
+      if (kind === 'foliage_mangrove') return [0.55, 0.69, 0.15];
       if (kind === 'foliage_birch') return [0.5, 0.65, 0.33];
       if (kind && kind.startsWith('foliage')) return hexRGB(bc.foliage);
       return [1, 1, 1];
