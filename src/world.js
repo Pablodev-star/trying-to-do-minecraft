@@ -334,6 +334,8 @@ export class World {
         const nx = x + ((this.rng() * 3) | 0) - 1, ny = y + ((this.rng() * 5) | 0) - 3, nz = z + ((this.rng() * 3) | 0) - 1;
         if (this.getBlock(nx, ny, nz) === B.dirt && !OPAQUE[this.getBlock(nx, ny + 1, nz)]) this.setBlock(nx, ny, nz, B.grass_block);
       }
+    } else if (id >= B.nether_wart_0 && id < B.nether_wart_3) {
+      if (this.getBlock(x, y - 1, z) === B.soul_sand && this.rng() < 0.15) this.setBlock(x, y, z, id + 1);
     } else if (id >= B.wheat_0 && id <= B.potatoes_7) {
       const stage = (id - B.wheat_0) % 8;
       const below = this.getBlock(x, y - 1, z);

@@ -199,7 +199,7 @@ export class TouchControls {
     else if (act === 'camera') g.thirdPerson = (g.thirdPerson + 1) % 3;
     else if (act === 'drop') {
       const s = p.heldItem();
-      if (s) { g.dropStack({ ...s, count: 1 }); s.count--; if (s.count <= 0) p.inventory[p.selected] = null; ui.refresh(); }
+      if (s) { g.dropStack({ ...s, count: 1, data: s.data ? JSON.parse(JSON.stringify(s.data)) : undefined }); s.count--; if (s.count <= 0) p.inventory[p.selected] = null; ui.refresh(); }
     }
   }
 }

@@ -1,6 +1,6 @@
 // Game bootstrap: renderer, title screen, world lifecycle, loop, input and game rules.
 import * as THREE from '../lib/three.module.min.js';
-import { BLOCKS, B, ITEMS, I, SMELTING, fuelTime } from './registry.js';
+import { BLOCKS, B, ITEMS, I, SMELTING, SMOKER_OK, fuelTime, copyStack } from './registry.js';
 import { World, worldUniforms, CS, CH, SOLID, OPAQUE } from './world.js';
 import { BIOMES } from './worldgen.js';
 import { Player } from './player.js';
@@ -11,6 +11,8 @@ import { tileCanvas, atlasCanvas } from './textures.js';
 import { playSound, audio, unlockAudio, startMusic } from './audio.js';
 import { hashString } from './noise.js';
 import { blockBoxesAt } from './shapes.js';
+import { enchLevel, ENCHANTS } from './enchant.js';
+import { brew, potionEffects } from './effects.js';
 import { ShaderPipeline, makeSkyDome } from './shaders.js';
 import { TouchControls, IS_TOUCH } from './touch.js';
 
@@ -562,7 +564,7 @@ class Game {
   spawnMob(type, x, y, z, opts) { if (!MOB_INFO[type]) return null; return this.addEntity(new Mob(this, type, x, y, z, opts)); }
   spawnItem(x, y, z, stack, scatter = false) {
     if (!stack || !stack.id || stack.count <= 0) return;
-    const e = new ItemEntity(this, x, y, z, { id: stack.id, count: stack.count, dmg: stack.dmg ?? 0 });
+    const e = new ItemEntity(this, x, y, z, copyStack(stack));
     e.vel.set((Math.random() - 0.5) * (scatter ? 6 : 3), 4, (Math.random() - 0.5) * (scatter ? 6 : 3));
     this.addEntity(e);
   }
@@ -574,6 +576,20 @@ class Game {
     e.pickupDelay = 1.5;
     this.addEntity(e);
   }
+  // Splash potion: affect every living thing within 4 blocks, scaled by distance
+  splashPotion(pos, kind, owner) {
+    this.sfx('glass');
+    const effects = potionEffects(kind);
+    const color = new THREE.Color(kind === 'water' ? 0x385dc6 : 0xb060ff);
+    for (let i = 0; i < 24; i++) this.particles.spawn(pos.x + (Math.random() - 0.5) * 2, pos.y + Math.random(), pos.z + (Math.random() - 0.5) * 2, color, new THREE.Vector3((Math.random() - 0.5) * 3, Math.random() * 2, (Math.random() - 0.5) * 3), 0.8, 0.08, 4);
+    if (kind === 'water') { for (const e of this.entities) if (e.type === 'enderman' && e.pos.distanceTo(pos) < 4) e.hurt(1, owner); return; }
+    const scaled = (d) => effects.map((ef) => ({ ...ef, t: ef.t * (1 - d / 5) }));
+    const p = this.player;
+    const dp = p.pos.clone().add(new THREE.Vector3(0, 0.9, 0)).distanceTo(pos);
+    if (dp < 4 && p.mode === 'survival') for (const ef of scaled(dp)) p.addEffect(ef.e, ef.t, ef.a);
+    for (const e of this.entities) if (e instanceof Mob && !e.dead) { const d = e.pos.distanceTo(pos); if (d < 4) e.applyPotion(scaled(d)); }
+  }
+
   spawnXP(x, y, z, amount) {
     amount = Math.round(amount);
     while (amount > 0) {
@@ -593,7 +609,18 @@ class Game {
     const tool = held ? ITEMS[held.id] : null;
     // shears / silk-like behaviour for leaves and grass
     if (tool?.toolType === 'shears' && (b.name.endsWith('_leaves') || b.name === 'short_grass' || b.name === 'fern' || b.name === 'cobweb')) return [{ id: b.name === 'cobweb' ? I.cobweb : id, count: 1 }];
+    // silk touch: the block itself (when it has an item)
+    if (enchLevel(held, 'silk_touch') && ITEMS[id] && !b.noItem && b.render !== 'liquid') {
+      const silk = { lit_furnace: 'furnace', lit_smoker: 'smoker', lit_blast_furnace: 'blast_furnace', farmland_wet: 'farmland' }[b.name];
+      return [{ id: silk ? I[silk] : id, count: 1 }];
+    }
     if (b.drops === null) return [];
+    const fortune = enchLevel(held, 'fortune');
+    if (fortune && b.name.endsWith('_ore') && b.drops !== undefined) {
+      const base = typeof b.drops === 'string' ? [[b.drops, 1]] : b.drops();
+      const mult = Math.max(1, Math.floor(Math.random() * (fortune + 2)));
+      return base.filter(([, n]) => n > 0).map(([n, c]) => ({ id: I[n], count: c * mult }));
+    }
     if (b.drops === undefined) return b.noItem ? [] : [{ id, count: 1 }];
     if (typeof b.drops === 'string') return [{ id: I[b.drops], count: 1 }];
     return b.drops().filter(([, n]) => n > 0).map(([n, c]) => ({ id: I[n], count: c }));
@@ -672,7 +699,9 @@ class Game {
     const k = `${x},${y},${z}`;
     let t = this.world.tiles.get(k);
     if (!t || t.type !== type) {
-      t = type === 'chest' ? { type, items: new Array(27).fill(null) } : { type, items: [null, null, null], burn: 0, burnMax: 0, cook: 0, xp: 0 };
+      t = type === 'chest' ? { type, items: new Array(27).fill(null) }
+        : type === 'brewing' ? { type, items: [null, null, null, null, null], fuel: 0, time: 0 }
+          : { type, items: [null, null, null], burn: 0, burnMax: 0, cook: 0, xp: 0 };
       if (type === 'chest' && this.dim === 'overworld' && this.world.gen.stronghold && Math.abs(x - this.world.gen.stronghold.x) < 8 && Math.abs(z - this.world.gen.stronghold.z) < 8 && !this.world.tiles.has(k)) {
         t.items[3] = { id: I.ender_pearl, count: 2, dmg: 0 }; t.items[7] = { id: I.iron_ingot, count: 4, dmg: 0 }; t.items[12] = { id: I.bread, count: 3, dmg: 0 }; t.items[20] = { id: I.blaze_rod, count: 1, dmg: 0 };
       }
@@ -682,13 +711,22 @@ class Game {
     return t;
   }
 
+  countBookshelves(x, y, z) {
+    let n = 0;
+    for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (let dy = 0; dy <= 1; dy++) {
+      if (Math.max(Math.abs(dx), Math.abs(dz)) !== 2) continue;
+      if (this.world.getBlock(x + dx, y + dy, z + dz) === B.bookshelf && !this.world.getBlock(x + Math.sign(dx), y + dy, z + Math.sign(dz))) n++;
+    }
+    return Math.min(15, n);
+  }
   fillLoot(items) {
     const table = [
       ['bread', 1, 4, 0.6], ['wheat', 2, 6, 0.4], ['iron_ingot', 1, 4, 0.45], ['gold_ingot', 1, 3, 0.3], ['diamond', 1, 2, 0.1],
       ['emerald', 1, 3, 0.15], ['coal', 3, 10, 0.5], ['bone', 2, 6, 0.4], ['rotten_flesh', 1, 6, 0.4], ['string', 1, 4, 0.3],
       ['gunpowder', 1, 4, 0.3], ['redstone', 2, 6, 0.3], ['apple', 1, 3, 0.4], ['saddle', 1, 1, 0.15], ['golden_apple', 1, 1, 0.05],
-      ['iron_pickaxe', 1, 1, 0.08], ['bucket', 1, 1, 0.15], ['wheat_seeds', 2, 5, 0.4], ['book', 1, 3, 0.2], ['ender_pearl', 1, 1, 0.08],
+      ['iron_pickaxe', 1, 1, 0.08], ['bucket', 1, 1, 0.15], ['experience_bottle', 1, 4, 0.15], ['name_tag', 1, 1, 0.12], ['nether_wart', 1, 3, 0.05], ['wheat_seeds', 2, 5, 0.4], ['book', 1, 3, 0.2], ['ender_pearl', 1, 1, 0.08],
     ];
+    if (Math.random() < 0.35) { const keys = Object.keys(ENCHANTS); const k = keys[Math.floor(Math.random() * keys.length)]; items[Math.floor(Math.random() * 27)] = { id: I.enchanted_book, count: 1, dmg: 0, data: { ench: { [k]: 1 + Math.floor(Math.random() * ENCHANTS[k].max) } } }; }
     for (const [name, a, b, p] of table) {
       if (Math.random() > p) continue;
       let slot = Math.floor(Math.random() * 27); let tries = 0;
@@ -737,15 +775,20 @@ class Game {
 
   tickFurnaces() {
     for (const [k, t] of this.world.tiles) {
+      if (t.type === 'brewing') { this.tickBrewing(k, t); continue; }
       if (t.type !== 'furnace') continue;
       const [x, y, z] = k.split(',').map(Number);
       if (!this.world.isLoaded(x, z)) continue;
+      const kind = t.kind ?? 'furnace';
+      const speed = kind === 'furnace' ? 1 : 2;
       const [inp, fuel, out] = t.items;
-      const resultName = inp ? SMELTING[ITEMS[inp.id].name] : null;
+      let resultName = inp ? SMELTING[ITEMS[inp.id].name] : null;
+      if (resultName && kind === 'smoker' && !SMOKER_OK.has(ITEMS[inp.id].name)) resultName = null;
+      if (resultName && kind === 'blast' && !/(_ore|raw_|ancient_debris)/.test(ITEMS[inp.id].name)) resultName = null;
       const resId = resultName ? I[resultName] : null;
       const canCook = resId != null && (!out || (out.id === resId && out.count < 64));
       let changed = false;
-      if (t.burn > 0) t.burn--;
+      if (t.burn > 0) t.burn -= speed;
       if (t.burn <= 0 && canCook && fuel && fuelTime(fuel.id)) {
         t.burn = t.burnMax = fuelTime(fuel.id);
         if (ITEMS[fuel.id].name === 'lava_bucket') t.items[1] = { id: I.bucket, count: 1, dmg: 0 };
@@ -753,7 +796,7 @@ class Game {
         changed = true;
       }
       if (t.burn > 0 && canCook) {
-        t.cook += 1 / TPS;
+        t.cook += speed / TPS;
         if (t.cook >= 10) {
           t.cook = 0;
           inp.count--; if (inp.count <= 0) t.items[0] = null;
@@ -765,11 +808,40 @@ class Game {
       } else if (t.cook > 0) t.cook = Math.max(0, t.cook - 2 / TPS);
       const lit = t.burn > 0;
       const id = this.world.getBlock(x, y, z);
-      if (lit && id === B.furnace) this.world.setBlock(x, y, z, B.lit_furnace, this.world.getMeta(x, y, z), { keepTile: true, noUpdate: true });
-      else if (!lit && id === B.lit_furnace) this.world.setBlock(x, y, z, B.furnace, this.world.getMeta(x, y, z), { keepTile: true, noUpdate: true });
+      const pair = { furnace: [B.furnace, B.lit_furnace], smoker: [B.smoker, B.lit_smoker], blast: [B.blast_furnace, B.lit_blast_furnace] }[kind];
+      if (lit && id === pair[0]) this.world.setBlock(x, y, z, pair[1], this.world.getMeta(x, y, z), { keepTile: true, noUpdate: true });
+      else if (!lit && id === pair[1]) this.world.setBlock(x, y, z, pair[0], this.world.getMeta(x, y, z), { keepTile: true, noUpdate: true });
       if ((changed || lit) && this.ui.screen === 'furnace' && this.ui.screenData === t && (this.world.tickCount % 4 === 0 || changed)) this.ui.renderScreen();
     }
   }
+
+  // brewing stand: slots 0-2 bottles, 3 ingredient, 4 blaze powder (fuel)
+  tickBrewing(k, t) {
+    const ing = t.items[3];
+    if (!t.fuel && t.items[4] && ITEMS[t.items[4].id].name === 'blaze_powder') { t.fuel = 20; t.items[4].count--; if (t.items[4].count <= 0) t.items[4] = null; }
+    const ingName = ing ? ITEMS[ing.id].name : null;
+    const results = [0, 1, 2].map((i) => {
+      const s = t.items[i];
+      if (!s || !ingName) return null;
+      const it = ITEMS[s.id];
+      if (it.kind !== 'potion') return null;
+      if (ingName === 'gunpowder') return it.splash ? null : { id: I.splash_potion, data: { potion: s.data?.potion ?? 'water' } };
+      const r = brew(s.data?.potion ?? 'water', ingName);
+      return r ? { id: s.id, data: { potion: r } } : null;
+    });
+    const can = (t.fuel ?? 0) > 0 && results.some(Boolean);
+    if (!can) { t.time = 0; return; }
+    t.time = (t.time ?? 0) + 1 / TPS;
+    if (t.time >= 20) {
+      t.time = 0;
+      results.forEach((r, i) => { if (r) t.items[i] = { id: r.id, count: 1, dmg: 0, data: r.data }; });
+      ing.count--; if (ing.count <= 0) t.items[3] = null;
+      t.fuel--;
+      this.sfx('fizz');
+    }
+    if (this.ui.screen === 'brewing' && this.ui.screenData === t && this.world.tickCount % 4 === 0) this.ui.renderScreen();
+  }
+
 
   // ---------------------------------------------------------------- mob spawning
   spawnTick() {
@@ -970,7 +1042,7 @@ class Game {
       if (code.startsWith('Digit')) { const n = Number(code.slice(5)) - 1; if (n >= 0 && n < 9) { p.selected = n; p.using = null; ui.refresh(); ui.showHeldName(); } }
       if (code === 'KeyQ') {
         const s = p.heldItem();
-        if (s) { const n = e.ctrlKey ? s.count : 1; this.dropStack({ ...s, count: n }); s.count -= n; if (s.count <= 0) p.inventory[p.selected] = null; ui.refresh(); }
+        if (s) { const n = e.ctrlKey ? s.count : 1; this.dropStack(copyStack(s, n)); s.count -= n; if (s.count <= 0) p.inventory[p.selected] = null; ui.refresh(); }
       }
       if (code === 'Space' && !e.repeat) {
         const now = performance.now();
@@ -1214,6 +1286,7 @@ class Game {
       this.ambient.intensity = 0.55; this.sunLight.intensity = 0.25;
     }
     if (d === 'overworld') { this.sun.visible = this.moon.visible = true; }
+    U.ambient.value = this.player?.hasEffect?.('night_vision') ? Math.max(this.dimAmbient, 0.85) : this.dimAmbient;
     const rd = (this.player ? this.options.renderDistance : 5) * CS;
     const p = this.player;
     if (p && (p.headInWater || p.headInLava)) { U.fogNear.value = 0; U.fogFar.value = p.headInLava ? 3 : 18; }
@@ -1405,7 +1478,7 @@ class Game {
       if (e instanceof ItemEntity && !e.remove && e.pickupDelay <= 0) {
         const dy = e.pos.y - p.pos.y;
         if (Math.abs(e.pos.x - p.pos.x) < 1.3 && Math.abs(e.pos.z - p.pos.z) < 1.3 && dy > -0.75 && dy < 2.3) {
-          const left = p.give(e.stack.id, e.stack.count, e.stack.dmg);
+          const left = p.give(e.stack.id, e.stack.count, e.stack.dmg, e.stack.data);
           if (left < e.stack.count) { playSound('pop'); if (ITEMS[e.stack.id].name.endsWith('_log')) this.achieve('¡Consigue madera!'); if (e.stack.id === I.diamond) this.achieve('¡Diamantes!'); }
           if (left <= 0) e.remove = true; else e.stack.count = left;
         }

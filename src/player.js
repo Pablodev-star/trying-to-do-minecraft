@@ -1,10 +1,12 @@
 // The player: movement, survival stats, mining, combat and item use.
 import * as THREE from '../lib/three.module.min.js';
-import { BLOCKS, B, ITEMS, I, maxStack } from './registry.js';
+import { BLOCKS, B, ITEMS, I, maxStack, sameKind, copyStack } from './registry.js';
 import { moveEntity, aabbIntersectsBlocks, rayAABB } from './physics.js';
 import { Mob, Projectile, PrimedTNT, EndCrystal } from './entities.js';
 import { SOLID, rotateBox } from './world.js';
 import { shapeBoxes } from './shapes.js';
+import { enchLevel, protectionFactor } from './enchant.js';
+import { EFFECTS, potionEffects } from './effects.js';
 
 const GRAV = 32;
 
@@ -42,20 +44,23 @@ export class Player {
     this.lastHurtMob = null;
     this.bob = 0;
     this.placeCooldown = 0;
+    this.effects = {};   // name -> { a: amplifier, t: seconds left }
+    this.absorb = 0;
   }
   get world() { return this.game.world; }
 
   // ---------------------------------------------------------------- inventory helpers
   heldItem() { return this.inventory[this.selected]; }
-  give(id, count = 1, dmg = 0) {
+  give(id, count = 1, dmg = 0, data) {
     const max = maxStack(id);
+    const probe = { id, count, dmg, ...(data ? { data } : {}) };
     // merge into existing stacks, hotbar first
     for (let i = 0; i < 36 && count > 0; i++) {
       const s = this.inventory[i];
-      if (s && s.id === id && !s.dmg && !dmg && s.count < max) { const n = Math.min(count, max - s.count); s.count += n; count -= n; }
+      if (sameKind(s, probe) && s.count < max) { const n = Math.min(count, max - s.count); s.count += n; count -= n; }
     }
     for (let i = 0; i < 36 && count > 0; i++) {
-      if (!this.inventory[i]) { const n = Math.min(count, max); this.inventory[i] = { id, count: n, dmg }; count -= n; }
+      if (!this.inventory[i]) { const n = Math.min(count, max); this.inventory[i] = copyStack(probe, n); count -= n; }
     }
     this.game.ui?.inventoryChanged();
     return count; // leftover
@@ -83,13 +88,21 @@ export class Player {
     else this.inventory[this.selected] = { id, count: 1, dmg: 0 };
     this.game.ui?.refresh();
   }
+  replaceHeldStack(stack) {
+    const s = this.heldItem();
+    if (this.mode !== 'creative' && s && s.count > 1) { s.count--; const left = this.give(stack.id, stack.count, stack.dmg, stack.data); if (left) this.game.spawnItem(this.pos.x, this.pos.y + 1, this.pos.z, { ...stack, count: left }); }
+    else if (this.mode === 'creative') this.give(stack.id, stack.count, stack.dmg, stack.data);
+    else this.inventory[this.selected] = stack;
+    this.game.ui?.inventoryChanged();
+  }
   damageHeld(n = 1) {
     if (this.mode === 'creative') return;
     const s = this.heldItem();
     if (!s) return;
     const it = ITEMS[s.id];
     if (!it.durability) return;
-    s.dmg = (s.dmg ?? 0) + n;
+    const ub = enchLevel(s, 'unbreaking');
+    for (let k = 0; k < n; k++) if (Math.random() < 1 / (ub + 1)) s.dmg = (s.dmg ?? 0) + 1;
     if (s.dmg >= it.durability) { this.inventory[this.selected] = null; this.game.sfx('break_tool'); }
     this.game.ui?.refresh();
   }
@@ -101,15 +114,54 @@ export class Player {
   }
 
   // ---------------------------------------------------------------- damage
+  // ---------------------------------------------------------------- status effects
+  hasEffect(e) { return this.effects[e]?.t > 0; }
+  effectLevel(e) { return this.effects[e]?.t > 0 ? this.effects[e].a + 1 : 0; }
+  addEffect(e, t, a = 0) {
+    if (EFFECTS[e]?.instant) {
+      if (e === 'instant_health') this.heal(4 << a);
+      else if (e === 'instant_damage') { this.hurtTime = 0; this.hurt(6 << a, 'magic'); }
+      else if (e === 'saturation') this.eat(a + 1, (a + 1) * 2);
+      return;
+    }
+    const cur = this.effects[e];
+    if (!cur || cur.a < a || (cur.a === a && cur.t < t)) this.effects[e] = { a, t };
+    if (e === 'absorption') this.absorb = Math.max(this.absorb, 4 * (a + 1));
+    this.game.ui?.refresh();
+  }
+  clearEffects() { this.effects = {}; this.absorb = 0; this.game.ui?.refresh(); }
+  tickEffects(dt) {
+    for (const [k, v] of Object.entries(this.effects)) {
+      v.t -= dt;
+      v.acc = (v.acc ?? 0) + dt;
+      const period = (base) => base / Math.pow(2, v.a);
+      if (k === 'regeneration' && v.acc >= period(2.5)) { v.acc = 0; this.heal(1); }
+      if (k === 'poison' && v.acc >= period(1.25)) { v.acc = 0; if (this.health > 1) { this.hurtTime = 0; this.hurt(1, 'magic'); } }
+      if (k === 'wither' && v.acc >= period(2)) { v.acc = 0; this.hurtTime = 0; this.hurt(1, 'wither'); }
+      if (k === 'hunger') this.exhaustion += 0.1 * (v.a + 1) * dt * 20 / 20;
+      if (v.t <= 0) { delete this.effects[k]; if (k === 'absorption') this.absorb = 0; this.game.ui?.refresh(); }
+    }
+  }
+
   hurt(amount, source, dir) {
     if (this.mode !== 'survival' || this.dead) return false;
     if (this.hurtTime > 0.35) return false;
     if (amount <= 0) { if (dir) { this.vel.x += dir.x * 4; this.vel.z += dir.z * 4; } return false; }
-    const isArmorable = source !== 'fall' && source !== 'drown' && source !== 'starve' && source !== 'void';
+    const kind = typeof source === 'string' ? source : source?.kind === 'arrow' || source?.ranged ? 'projectile' : 'mob';
+    if ((kind === 'fire' || kind === 'lava') && this.hasEffect('fire_resistance')) return false;
+    const isArmorable = !['fall', 'drown', 'starve', 'void', 'magic', 'wither'].includes(kind);
     let dmg = amount;
     if (isArmorable) {
       dmg *= 1 - Math.min(20, this.armorPoints()) / 25;
-      for (let i = 0; i < 4; i++) { const a = this.armor[i]; if (a) { a.dmg = (a.dmg ?? 0) + 1; if (a.dmg >= ITEMS[a.id].durability) this.armor[i] = null; } }
+      for (let i = 0; i < 4; i++) { const a = this.armor[i]; if (a && Math.random() < 1 / (enchLevel(a, 'unbreaking') + 1)) { a.dmg = (a.dmg ?? 0) + 1; if (a.dmg >= ITEMS[a.id].durability) this.armor[i] = null; } }
+    }
+    if (kind !== 'void' && kind !== 'starve') dmg *= protectionFactor(this.armor, kind === 'mob' ? 'generic' : kind);
+    if (this.hasEffect('resistance') && kind !== 'void') dmg *= Math.max(0, 1 - 0.2 * this.effectLevel('resistance'));
+    if (this.absorb > 0) { const a = Math.min(this.absorb, dmg); this.absorb -= a; dmg -= a; }
+    // thorns
+    if (source instanceof Mob) {
+      const th = Math.max(...this.armor.map((a) => enchLevel(a, 'thorns')));
+      if (th && Math.random() < 0.15 * th) source.hurt(1 + Math.floor(Math.random() * 4), this);
     }
     this.health -= dmg;
     this.hurtTime = 0.5;
@@ -198,7 +250,9 @@ export class Player {
     let speed = this.flying ? (this.sprinting ? 21.6 : 10.9) : this.sneaking ? 1.31 : this.sprinting ? 5.61 : 4.32;
     if (this.using) speed *= 0.35;
     if (!this.flying && below === B.soul_sand) speed *= 0.5;
-    if (this.inWater && !this.flying) speed *= 0.5;
+    if (this.inWater && !this.flying) speed *= 0.5 + 0.5 * Math.min(3, enchLevel(this.armor[3], 'depth_strider')) / 3;
+    if (this.hasEffect('speed')) speed *= 1 + 0.2 * this.effectLevel('speed');
+    if (this.hasEffect('slowness')) speed *= Math.max(0, 1 - 0.15 * this.effectLevel('slowness'));
     if (this.inLava && !this.flying) speed *= 0.3;
     if (inWeb) speed *= 0.25;
 
@@ -230,7 +284,7 @@ export class Player {
         this.vel.y -= GRAV * dt;
         this.vel.y *= 0.98 ** (dt * 20);
         if (input.jump && ground && this.jumpCooldown <= 0) {
-          this.vel.y = 9.0;
+          this.vel.y = 9.0 + this.effectLevel('jump_boost') * 1.6;
           this.jumpCooldown = 0.25;
           if (this.sprinting) { this.vel.x += -sin * 2; this.vel.z += -cos * 2; this.exhaustion += 0.2; } else this.exhaustion += 0.05;
         }
@@ -267,6 +321,9 @@ export class Player {
     }
 
     // ---- survival mechanics
+    this.tickEffects(dt);
+    if (this.hasEffect('levitation') && !this.flying) { this.vel.y = 0.9 * this.effectLevel('levitation') * 2; this.fallStart = null; }
+    if (this.hasEffect('slow_falling') && this.vel.y < -1.6) { this.vel.y = -1.6; this.fallStart = null; }
     if (this.mode === 'survival') this.survivalTick(dt, touching);
 
     // portals
@@ -285,11 +342,12 @@ export class Player {
   survivalTick(dt, touching) {
     // air
     if (this.headInWater) {
-      this.air -= dt;
+      if (!this.hasEffect('water_breathing') && Math.random() < 1 / (enchLevel(this.armor[0], 'respiration') + 1)) this.air -= dt * (enchLevel(this.armor[0], 'respiration') + 1) / (enchLevel(this.armor[0], 'respiration') + 1);
       if (this.air <= 0) { this.air = 0; this.drownTimer += dt; if (this.drownTimer >= 1) { this.drownTimer = 0; this.hurt(2, 'drown'); } }
     } else this.air = Math.min(15, this.air + dt * 5);
     // lava / fire
-    if (this.inLava) { this.fire = 8; this.lavaTimer = (this.lavaTimer ?? 0) + dt; if (this.lavaTimer > 0.5) { this.lavaTimer = 0; this.hurtTime = 0; this.hurt(4, 'lava'); } }
+    if (this.hasEffect('fire_resistance')) this.fire = 0;
+    if (this.inLava && !this.hasEffect('fire_resistance')) { this.fire = 8; this.lavaTimer = (this.lavaTimer ?? 0) + dt; if (this.lavaTimer > 0.5) { this.lavaTimer = 0; this.hurtTime = 0; this.hurt(4, 'lava'); } }
     if (touching((id) => id === B.fire)) this.fire = Math.max(this.fire, 4);
     if (this.inWater) this.fire = 0;
     if (this.fire > 0) { this.fire -= dt; this.fireTimer = (this.fireTimer ?? 0) + dt; if (this.fireTimer > 1) { this.fireTimer = 0; this.hurt(1, 'fire'); } }
@@ -335,8 +393,12 @@ export class Player {
     const correctTool = it && it.toolType && (it.toolType === b.tool || (it.toolType === 'sword' && b.name === 'cobweb') || (it.toolType === 'shears' && (b.name.endsWith('_leaves') || b.name.endsWith('_wool') || b.name === 'cobweb')));
     if (correctTool) speed = it.toolType === 'sword' ? 15 : it.speed ?? 1;
     else if (it?.toolType === 'sword') speed = 1.5;
+    const eff = enchLevel(held, 'efficiency');
+    if (eff && correctTool) speed += eff * eff + 1;
+    if (this.hasEffect('haste')) speed *= 1 + 0.2 * this.effectLevel('haste');
+    if (this.hasEffect('mining_fatigue')) speed *= Math.pow(0.3, Math.min(4, this.effectLevel('mining_fatigue')));
     const canHarvest = !b.needsTool || (correctTool && (it.level ?? 0) >= b.level);
-    if (this.headInWater) speed /= 5;
+    if (this.headInWater && !enchLevel(this.armor[0], 'aqua_affinity')) speed /= 5;
     if (!this.onGround && !this.flying) speed /= 5;
     return { perSec: speed / b.hardness / (canHarvest ? 30 : 100) * 20, canHarvest, correctTool };
   }
@@ -381,12 +443,22 @@ export class Player {
     const held = this.heldItem();
     const it = held ? ITEMS[held.id] : null;
     let dmg = it?.damage ?? 1;
+    const sh = enchLevel(held, 'sharpness'); if (sh) dmg += 0.5 * sh + 0.5;
+    const undead = ['zombie', 'skeleton', 'zombified_piglin', 'husk', 'drowned', 'stray', 'wither_skeleton', 'phantom', 'wither', 'zoglin'].includes(e.type);
+    const arthropod = ['spider', 'cave_spider', 'bee', 'silverfish', 'endermite'].includes(e.type);
+    if (undead) dmg += 2.5 * enchLevel(held, 'smite');
+    if (arthropod) dmg += 2.5 * enchLevel(held, 'bane_of_arthropods');
+    dmg += 3 * this.effectLevel('strength');
+    if (this.hasEffect('weakness')) dmg = Math.max(0, dmg - 4);
     const crit = !this.onGround && this.vel.y < 0 && !this.inWater;
     if (crit) dmg *= 1.5;
     if (this.mode === 'creative' && e instanceof Mob && e.type !== 'ender_dragon') dmg = Math.max(dmg, 1000);
     const dir = this.lookDir().setY(0).normalize();
     if (this.sprinting) dir.multiplyScalar(1.6);
+    const kb = enchLevel(held, 'knockback'); if (kb) dir.multiplyScalar(1 + kb * 0.8);
+    if (e instanceof Mob) e.looting = enchLevel(held, 'looting');
     if (e.hurt(dmg, this, dir)) {
+      const fa = enchLevel(held, 'fire_aspect'); if (fa && e.fire != null) e.fire = Math.max(e.fire, 4 * fa);
       if (crit) this.game.sfx('crit');
       this.exhaustion += 0.1;
       if (it?.durability) this.damageHeld(it.toolType === 'sword' ? 1 : 2);
@@ -408,6 +480,7 @@ export class Player {
     if (p && p.entity && p.entity instanceof Mob) {
       const e = p.entity;
       const name = it?.name;
+      if (it?.name === 'name_tag' && held.data?.name) { e.customName = held.data.name; e.persistent = true; this.consumeHeld(); g.chat(`Has nombrado a la criatura: ${held.data.name}`); return; }
       if (e.type === 'villager') { g.ui.openTrade(e); return; }
       if (e.type === 'sheep' && name === 'shears') { if (e.shear()) { this.damageHeld(); g.sfx('shear'); } return; }
       if (e.type === 'cow' && name === 'bucket') { this.replaceHeld(I.milk_bucket); return; }
@@ -430,7 +503,31 @@ export class Player {
       const k = `${hit.x},${hit.y},${hit.z}`;
       if (id === B.crafting_table) { g.ui.open('crafting'); return; }
       if (id === B.furnace || id === B.lit_furnace) { g.ui.open('furnace', g.getTile(hit.x, hit.y, hit.z, 'furnace'), k); return; }
-      if (id === B.chest) { g.ui.open('chest', g.getTile(hit.x, hit.y, hit.z, 'chest'), k); return; }
+      if (id === B.chest || id === B.barrel) { g.ui.open('chest', g.getTile(hit.x, hit.y, hit.z, 'chest'), k); return; }
+      if (id === B.smoker || id === B.lit_smoker || id === B.blast_furnace || id === B.lit_blast_furnace) {
+        const t = g.getTile(hit.x, hit.y, hit.z, 'furnace'); t.kind = id === B.smoker || id === B.lit_smoker ? 'smoker' : 'blast';
+        g.ui.open('furnace', t, k); return;
+      }
+      if (id === B.brewing_stand) { g.ui.open('brewing', g.getTile(hit.x, hit.y, hit.z, 'brewing'), k); return; }
+      if (id === B.enchanting_table) { g.ui.open('enchanting', { x: hit.x, y: hit.y, z: hit.z }); return; }
+      if (id === B.anvil) { g.ui.open('anvil'); return; }
+      if (id === B.grindstone) { g.ui.open('grindstone'); return; }
+      if (id === B.smithing_table) { g.ui.open('smithing'); return; }
+      if (id === B.stonecutter) { g.ui.open('stonecutter'); return; }
+      if (id === B.cauldron) {
+        const m = w.getMeta(hit.x, hit.y, hit.z);
+        if (it?.name === 'water_bucket') { w.setBlock(hit.x, hit.y, hit.z, B.cauldron, 3); if (this.mode !== 'creative') this.inventory[this.selected] = { id: I.bucket, count: 1, dmg: 0 }; g.sfx('bucket'); g.ui.refresh(); return; }
+        if (it?.name === 'bucket' && m === 3) { w.setBlock(hit.x, hit.y, hit.z, B.cauldron, 0); this.replaceHeld(I.water_bucket); g.sfx('bucket'); return; }
+        if (it?.name === 'potion' && held.data?.potion === 'water' && m < 3) { w.setBlock(hit.x, hit.y, hit.z, B.cauldron, m + 1); this.replaceHeld(I.glass_bottle); g.sfx('bucket'); return; }
+        if (it?.name?.startsWith('leather_') && m > 0 && held.data?.color) { delete held.data.color; w.setBlock(hit.x, hit.y, hit.z, B.cauldron, m - 1); g.ui.refresh(); return; }
+      }
+      if (id === B.composter) {
+        const m = w.getMeta(hit.x, hit.y, hit.z);
+        if (m >= 7) { w.setBlock(hit.x, hit.y, hit.z, B.composter, 0); g.spawnItem(hit.x + 0.5, hit.y + 1, hit.z + 0.5, { id: I.bone_meal, count: 1 }); g.sfx('dig:grass'); return; }
+        const compost = { wheat_seeds: 0.3, short_grass: 0.3, oak_leaves: 0.3, spruce_leaves: 0.3, birch_leaves: 0.3, jungle_leaves: 0.3, acacia_leaves: 0.3, oak_sapling: 0.3, spruce_sapling: 0.3, birch_sapling: 0.3, sugar_cane: 0.5, cactus: 0.5, melon_slice: 0.5, wheat: 0.65, carrot: 0.65, potato: 0.65, apple: 0.65, pumpkin: 0.65, melon: 0.65, dandelion: 0.65, poppy: 0.65, bread: 0.85, baked_potato: 0.85, cookie: 0.85, hay_block: 0.85 };
+        const chance = it && compost[it.name];
+        if (chance) { this.consumeHeld(); if (Math.random() < chance) w.setBlock(hit.x, hit.y, hit.z, B.composter, Math.min(7, m + 1)); g.sfx('dig:grass'); g.particles?.burst(hit.x + 0.5, hit.y + 1, hit.z + 0.5, 0x8aa040); return; }
+      }
       if (id === B.bed) { g.sleep(hit); return; }
       if (id === B.oak_door) {
         const m = w.getMeta(hit.x, hit.y, hit.z);
@@ -454,6 +551,26 @@ export class Player {
     if (!it) return;
 
     // food
+    if (it.kind === 'potion' && !it.splash) { this.using = { kind: 'eat', time: 0, dur: 1.6, drink: true }; return; }
+    if (it.kind === 'potion' && it.splash) {
+      const dir = this.lookDir();
+      const pr = new Projectile(g, 'splash', this.eyePos().addScaledVector(dir, 0.4), dir.multiplyScalar(20).add(new THREE.Vector3(0, 3, 0)), this);
+      pr.potion = held.data?.potion ?? 'water';
+      g.addEntity(pr); this.consumeHeld(); this.swing = 1; g.sfx('throw');
+      return;
+    }
+    if (it.name === 'experience_bottle') {
+      const dir = this.lookDir();
+      const pr = new Projectile(g, 'xp_bottle', this.eyePos().addScaledVector(dir, 0.4), dir.multiplyScalar(18).add(new THREE.Vector3(0, 3, 0)), this);
+      g.addEntity(pr); this.consumeHeld(); this.swing = 1; g.sfx('throw');
+      return;
+    }
+    if (it.name === 'glass_bottle') {
+      const fh = w.raycast(this.eyePos(), this.lookDir(), 5, true);
+      if (fh && fh.id === B.water) { this.replaceHeldStack({ id: I.potion, count: 1, dmg: 0, data: { potion: 'water' } }); g.sfx('bucket'); }
+      else if (fh && fh.id === B.cauldron && w.getMeta(fh.x, fh.y, fh.z) > 0) { w.setBlock(fh.x, fh.y, fh.z, B.cauldron, w.getMeta(fh.x, fh.y, fh.z) - 1); this.replaceHeldStack({ id: I.potion, count: 1, dmg: 0, data: { potion: 'water' } }); g.sfx('bucket'); }
+      return;
+    }
     if (it.food) {
       if (this.food < 20 || this.mode === 'creative' || it.name === 'golden_apple' || it.milk) { this.using = { kind: 'eat', time: 0, dur: it.name === 'dried_kelp' ? 0.8 : 1.6 }; }
       return;
@@ -538,6 +655,7 @@ export class Player {
       }
     }
     // seeds / crops
+    if (it.name === 'nether_wart' && id === B.soul_sand && hit.face[1] === 1 && !w.getBlock(hit.x, hit.y + 1, hit.z)) { w.setBlock(hit.x, hit.y + 1, hit.z, B.nether_wart_0); this.consumeHeld(); return; }
     const crop = { wheat_seeds: B.wheat_0, carrot: B.carrots_0, potato: B.potatoes_0 }[it.name];
     if (crop != null) {
       if ((id === B.farmland || id === B.farmland_wet) && hit.face[1] === 1 && !w.getBlock(hit.x, hit.y + 1, hit.z)) { w.setBlock(hit.x, hit.y + 1, hit.z, crop); this.consumeHeld(); g.sfx('dig:grass'); }
@@ -669,10 +787,18 @@ export class Player {
       if (!holding) { this.using = null; return; }
       if (Math.floor(this.using.time * 5) !== Math.floor((this.using.time - dt) * 5)) this.game.sfx('eat');
       if (this.using.time >= this.using.dur) {
-        if (it.milk) { this.replaceHeld(I.bucket); this.using = null; return; }
+        if (it.milk) { this.clearEffects(); this.replaceHeld(I.bucket); this.using = null; return; }
+        if (this.using.drink) {
+          for (const ef of potionEffects(held.data?.potion)) this.addEffect(ef.e, ef.t, ef.a);
+          this.replaceHeld(I.glass_bottle); this.game.sfx('burp'); this.using = null; this.game.ui.refresh(); return;
+        }
         this.eat(it.food[0], it.food[1]);
-        if (it.name === 'golden_apple') { this.heal(4); this.absorb = 4; }
-        if (it.name === 'rotten_flesh' && Math.random() < 0.8) this.saturation = 0;
+        if (it.name === 'golden_apple') { this.addEffect('regeneration', 5, 1); this.addEffect('absorption', 120, 0); }
+        if (it.name === 'enchanted_golden_apple') { this.addEffect('regeneration', 20, 1); this.addEffect('absorption', 120, 3); this.addEffect('resistance', 300, 0); this.addEffect('fire_resistance', 300, 0); }
+        if (it.name === 'rotten_flesh' && Math.random() < 0.8) this.addEffect('hunger', 30, 0);
+        if (it.name === 'spider_eye') this.addEffect('poison', 5, 0);
+        if (it.name === 'pufferfish') { this.addEffect('hunger', 15, 2); this.addEffect('poison', 60, 1); }
+        if (it.name === 'chicken' && Math.random() < 0.3) this.addEffect('hunger', 30, 0);
         if (it.name === 'mushroom_stew') this.replaceHeld(I.bowl); else this.consumeHeld();
         this.game.sfx('burp');
         this.using = null;
@@ -683,10 +809,13 @@ export class Player {
         const charge = Math.min(1, this.using.time / 1);
         this.using = null;
         if (charge < 0.1) return;
-        if (this.mode !== 'creative') this.takeItem(I.arrow, 1);
+        if (this.mode !== 'creative' && !enchLevel(held, 'infinity')) this.takeItem(I.arrow, 1);
         const dir = this.lookDir();
         const pr = new Projectile(this.game, 'arrow', this.eyePos().addScaledVector(dir, 0.3), dir.multiplyScalar(60 * charge), this);
-        pr.power = charge >= 1 ? 1.5 : 1;
+        pr.power = (charge >= 1 ? 1.5 : 1) * (1 + 0.25 * enchLevel(held, 'power'));
+        pr.punch = enchLevel(held, 'punch');
+        pr.flame = enchLevel(held, 'flame') > 0;
+        if (enchLevel(held, 'infinity')) pr.pickup = false, pr.noPickup = true;
         this.game.addEntity(pr);
         this.damageHeld();
         this.game.sfx('bow');

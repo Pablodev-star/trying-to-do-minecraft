@@ -1,6 +1,6 @@
 // Entities: mobs (with AI), dropped items, projectiles, primed TNT, falling blocks, end crystals.
 import * as THREE from '../lib/three.module.min.js';
-import { BLOCKS, B, ITEMS, I } from './registry.js';
+import { BLOCKS, B, ITEMS, I, sameKind } from './registry.js';
 import { moveEntity, aabbIntersectsBlocks } from './physics.js';
 import { buildModel, setTint } from './models.js';
 import { atlasCanvas, tileUV, itemSpriteCanvas, tileCanvas } from './textures.js';
@@ -121,7 +121,7 @@ export class ItemEntity extends Entity {
     this.inner.material.color?.setRGB(l, l, l);
     // merge with nearby equal stacks
     if (((this.age * 4) | 0) % 4 === 0) for (const e of this.game.entities) {
-      if (e !== this && e instanceof ItemEntity && !e.remove && e.stack.id === this.stack.id && !this.stack.dmg && !e.stack.dmg && e.pos.distanceToSquared(this.pos) < 0.6) {
+      if (e !== this && e instanceof ItemEntity && !e.remove && sameKind(e.stack, this.stack) && e.pos.distanceToSquared(this.pos) < 0.6) {
         const max = ITEMS[this.stack.id].stack;
         if (this.stack.count + e.stack.count <= max) { this.stack.count += e.stack.count; e.remove = true; }
       }
@@ -179,7 +179,7 @@ export class Projectile extends Entity {
     this.vel.copy(vel);
     this.w = 0.25; this.h = 0.25;
     this.stuck = false;
-    const g = { arrow: 0.05, snowball: 0.03, egg: 0.03, ender_pearl: 0.03, fireball: 0, small_fireball: 0, potion: 0.05, eye: 0 }[kind] ?? 0.03;
+    const g = { arrow: 0.05, snowball: 0.03, egg: 0.03, ender_pearl: 0.03, fireball: 0, small_fireball: 0, potion: 0.05, splash: 0.05, xp_bottle: 0.05, eye: 0 }[kind] ?? 0.03;
     this.grav = g * 400;
     if (kind === 'arrow') {
       const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.6), new THREE.MeshLambertMaterial({ color: 0x8a6436 }));
@@ -191,7 +191,7 @@ export class Projectile extends Entity {
       this.inner = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), new THREE.MeshBasicMaterial({ color: kind === 'fireball' ? 0xff7a1a : 0xffb030 }));
       this.w = this.h = s;
     } else {
-      const id = { snowball: I.snowball, egg: I.egg, ender_pearl: I.ender_pearl, potion: I.glowstone_dust, eye: I.ender_eye }[kind];
+      const id = { snowball: I.snowball, egg: I.egg, ender_pearl: I.ender_pearl, potion: I.splash_potion, splash: I.splash_potion, xp_bottle: I.experience_bottle, eye: I.ender_eye }[kind];
       this.inner = makeSpriteMesh(id, 0.35);
     }
     this.mesh.add(this.inner);
@@ -226,11 +226,15 @@ export class Projectile extends Entity {
   impactEntity(e) {
     const k = this.kind;
     if (e.type === 'enderman' && k !== 'ender_pearl') { e.teleport(); this.remove = true; return; }
-    if (k === 'arrow') e.hurt(Math.max(2, Math.ceil(this.vel.length() / 60 * 9 * (this.power ?? 1))), this.owner, this.vel.clone().normalize());
+    if (k === 'arrow') {
+      const dir = this.vel.clone().normalize().multiplyScalar(1 + (this.punch ?? 0) * 1.2);
+      if (e.hurt(Math.max(2, Math.ceil(this.vel.length() / 60 * 9 * (this.power ?? 1))), this.owner, dir) && this.flame && e.fire != null) e.fire = Math.max(e.fire, 5);
+    }
+    else if (k === 'splash' || k === 'potion') { this.game.splashPotion(this.pos, this.potion ?? 'harming', this.owner); }
+    else if (k === 'xp_bottle') { this.game.spawnXP(this.pos.x, this.pos.y, this.pos.z, 3 + Math.floor(Math.random() * 9)); this.game.sfx('glass'); }
     else if (k === 'snowball') e.hurt(e.type === 'blaze' ? 3 : 0, this.owner, this.vel.clone().normalize());
     else if (k === 'fireball') { this.game.explode(this.pos.x, this.pos.y, this.pos.z, 1, true); e.hurt(6, this.owner); }
     else if (k === 'small_fireball') { e.hurt(5, this.owner); e.fire = 5; }
-    else if (k === 'potion') e.hurt(6, this.owner);
     else if (k === 'ender_pearl') this.pearlTeleport();
     else if (k === 'egg') this.eggHatch();
     this.remove = true;
@@ -242,6 +246,8 @@ export class Projectile extends Entity {
     if (k === 'small_fireball') { const p = this.pos.clone().sub(this.vel.clone().normalize().multiplyScalar(0.3)); const x = Math.floor(p.x), y = Math.floor(p.y), z = Math.floor(p.z); if (!this.world.getBlock(x, y, z)) this.world.setBlock(x, y, z, B.fire); }
     if (k === 'ender_pearl') this.pearlTeleport();
     if (k === 'egg') this.eggHatch();
+    if (k === 'splash' || k === 'potion') this.game.splashPotion(this.pos, this.potion ?? 'harming', this.owner);
+    if (k === 'xp_bottle') { this.game.spawnXP(this.pos.x, this.pos.y + 0.3, this.pos.z, 3 + Math.floor(Math.random() * 9)); this.game.sfx('glass'); }
     this.remove = true;
     void id;
   }
@@ -375,7 +381,7 @@ export class Mob extends Entity {
     if (this.baby) return;
     const fire = this.fire > 0;
     for (const [name, a, b] of this.info.drops) {
-      let n = a + Math.floor(Math.random() * (b - a + 1));
+      let n = a + Math.floor(Math.random() * (b - a + 1 + (this.looting ?? 0)));
       let id = I[name];
       if (fire && I['cooked_' + name]) id = I['cooked_' + name];
       if (name === 'beef' && fire) id = I.cooked_beef;
@@ -386,6 +392,18 @@ export class Mob extends Entity {
     if (this.type === 'slime' && this.size > 1) for (let i = 0; i < 2 + ((Math.random() * 2) | 0); i++) this.game.spawnMob('slime', this.pos.x + (Math.random() - 0.5), this.pos.y + 0.5, this.pos.z + (Math.random() - 0.5), { size: this.size / 2 });
     if (this.lastAttackedByPlayer || source === this.game.player) this.game.spawnXP(this.pos.x, this.pos.y + 0.5, this.pos.z, this.info.xp);
     if (this.type === 'ender_dragon') this.game.onDragonDeath(this);
+  }
+  applyPotion(effects) {
+    const undead = ['zombie', 'skeleton', 'zombified_piglin', 'husk', 'drowned', 'stray', 'wither_skeleton', 'phantom', 'wither', 'zoglin'].includes(this.type);
+    for (const ef of effects) {
+      let e = ef.e;
+      if (undead && e === 'instant_health') e = 'instant_damage'; else if (undead && e === 'instant_damage') e = 'instant_health';
+      if (e === 'instant_health') this.health = Math.min(this.maxHealth, this.health + (4 << ef.a));
+      else if (e === 'instant_damage') { this.hurtTime = 0; this.hurt(6 << ef.a, null); }
+      else if (e === 'poison' && !undead) this.poison = Math.max(this.poison ?? 0, ef.t);
+      else if (e === 'slowness') this.slowFor = Math.max(this.slowFor ?? 0, ef.t);
+      else if (e === 'speed') this.fastFor = Math.max(this.fastFor ?? 0, ef.t);
+    }
   }
   teleport() {
     for (let i = 0; i < 16; i++) {
@@ -412,6 +430,9 @@ export class Mob extends Entity {
       return;
     }
     if (this.attackCooldown > 0) this.attackCooldown -= dt;
+    if (this.poison > 0) { this.poison -= dt; this.poisonAcc = (this.poisonAcc ?? 0) + dt; if (this.poisonAcc > 1.25 && this.health > 1) { this.poisonAcc = 0; this.hurtTime = 0; this.hurt(1, null); } }
+    if (this.slowFor > 0) this.slowFor -= dt;
+    if (this.fastFor > 0) this.fastFor -= dt;
     if (this.growTimer > 0) { this.growTimer -= dt; if (this.growTimer <= 0 && this.baby) this.growUp(); }
     if (this.love > 0) this.love -= dt;
     if (this.breedCooldown > 0) this.breedCooldown -= dt;
@@ -425,7 +446,7 @@ export class Mob extends Entity {
     if (this.pos.y < -40) { this.health = 0; this.die(null); return; }
     if (this.type === 'enderman' && this.inWater) this.teleport();
     // AI
-    let moveDir = null, speed = this.info.speed, wantJump = false;
+    let moveDir = null, speed = this.info.speed * (this.slowFor > 0 ? 0.6 : 1) * (this.fastFor > 0 ? 1.4 : 1), wantJump = false;
     const toPlayer = p.pos.clone().sub(this.pos);
     const distP = toPlayer.length();
     const playerTargetable = p.mode === 'survival' && !p.dead;
@@ -574,6 +595,7 @@ export class Mob extends Entity {
     for (let i = 0; i < shots; i++) {
       const v = d.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.1 * i, 0, (Math.random() - 0.5) * 0.1 * i)).normalize().multiplyScalar(speed);
       const pr = new Projectile(this.game, kind, from.clone(), v, this);
+      if (kind === 'potion') pr.potion = ['harming', 'poison', 'slowness', 'weakness'][Math.floor(Math.random() * 4)];
       this.game.addEntity(pr);
     }
     this.game.sfx(kind === 'arrow' ? 'bow' : 'fireball');
@@ -721,7 +743,14 @@ export class XPOrb extends Entity {
       this.vel.addScaledVector(to.normalize(), dt * 40 * (1 - d / 8) + dt * 6);
       this.vel.multiplyScalar(0.9);
       this.pos.addScaledVector(this.vel, dt);
-      if (d < 0.7) { this.remove = true; if (p.mode === 'survival') p.addXP(this.value); this.game.sfx('xp'); }
+      if (d < 0.7) {
+        this.remove = true;
+        let xp = this.value;
+        const mend = [p.heldItem(), ...p.armor].filter((s) => s && s.dmg > 0 && s.data?.ench?.mending);
+        if (mend.length) { const s = mend[Math.floor(Math.random() * mend.length)]; const fix = Math.min(s.dmg, xp * 2); s.dmg -= fix; xp -= Math.ceil(fix / 2); }
+        if (p.mode === 'survival' && xp > 0) p.addXP(xp);
+        this.game.sfx('xp');
+      }
     } else this.physics(dt, 16, 0.9);
     const k = 0.75 + Math.sin(this.age * 6) * 0.25;
     this.inner.material.color.setRGB(0.6 + 0.4 * k, 1, 0.25 * k);

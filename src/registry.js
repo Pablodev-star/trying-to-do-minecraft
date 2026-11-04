@@ -198,6 +198,25 @@ block('nether_brick_fence', 'Valla de ladrillos del Nether', { tex: 'nether_bric
 block('glass_pane', 'Panel de cristal', { tex: 'glass', render: 'box', shape: 'pane', opaque: false, pass: 'cutout', hardness: 0.3, drops: null, sound: 'glass' });
 block('iron_bars', 'Barrotes de hierro', { tex: 'iron_bars', render: 'box', shape: 'pane', opaque: false, pass: 'cutout', hardness: 5, tool: 'pickaxe', needsTool: true });
 block('lantern', 'Farol', { tex: T('lantern_top', 'lantern'), render: 'box', box: [5, 0, 5, 11, 9, 11], opaque: false, hardness: 3.5, tool: 'pickaxe', light: 15, sound: 'stone' });
+// Work stations (also villager job sites)
+block('enchanting_table', 'Mesa de encantamientos', { tex: T('enchanting_table_top', 'enchanting_table_side', 'obsidian'), render: 'box', box: [0, 0, 0, 16, 12, 16], opaque: false, hardness: 5, tool: 'pickaxe', needsTool: true, light: 7 });
+block('anvil', 'Yunque', { tex: T('anvil_top', 'anvil'), render: 'box', box: [2, 0, 3, 14, 16, 13], opaque: false, hardness: 5, tool: 'pickaxe', needsTool: true, orient: true, gravity: true });
+block('brewing_stand', 'Soporte para pociones', { tex: T('brewing_stand_top', 'brewing_stand'), render: 'box', box: [2, 0, 2, 14, 14, 14], pass: 'cutout', opaque: false, hardness: 0.5, tool: 'pickaxe', light: 1 });
+block('cauldron', 'Caldero', { tex: T('cauldron_top', 'cauldron_side', 'cauldron_side'), render: 'box', box: [0, 0, 0, 16, 16, 16], pass: 'cutout', opaque: false, hardness: 2, tool: 'pickaxe', needsTool: true });
+block('grindstone', 'Afiladora', { tex: T('grindstone_top', 'grindstone'), render: 'box', box: [2, 0, 4, 14, 14, 12], opaque: false, hardness: 2, tool: 'pickaxe', orient: true });
+block('smithing_table', 'Mesa de herrería', { tex: T('smithing_table_top', 'smithing_table_side', 'smithing_table_bottom'), hardness: 2.5, tool: 'axe', sound: 'wood' });
+block('stonecutter', 'Cortapiedras', { tex: T('stonecutter_top', 'stonecutter_side', 'smooth_stone'), render: 'box', box: [0, 0, 0, 16, 9, 16], opaque: false, hardness: 3.5, tool: 'pickaxe' });
+block('loom', 'Telar', { tex: T('loom_top', 'loom_side', 'oak_planks', 'loom_front'), hardness: 2.5, tool: 'axe', orient: true, sound: 'wood' });
+block('cartography_table', 'Mesa de cartografía', { tex: T('cartography_top', 'cartography_side', 'dark_planks'), hardness: 2.5, tool: 'axe', sound: 'wood' });
+block('fletching_table', 'Mesa de flechería', { tex: T('fletching_top', 'fletching_side', 'birch_planks'), hardness: 2.5, tool: 'axe', sound: 'wood' });
+block('smoker', 'Ahumador', { tex: T('smoker_top', 'smoker_side', 'smoker_top', 'smoker_front'), hardness: 3.5, tool: 'pickaxe', needsTool: true, orient: true });
+block('lit_smoker', 'Ahumador encendido', { tex: T('smoker_top', 'smoker_side', 'smoker_top', 'smoker_front_on'), hardness: 3.5, tool: 'pickaxe', needsTool: true, orient: true, light: 13, drops: 'smoker', noItem: true });
+block('blast_furnace', 'Alto horno', { tex: T('blast_top', 'blast_side', 'blast_top', 'blast_front'), hardness: 3.5, tool: 'pickaxe', needsTool: true, orient: true });
+block('lit_blast_furnace', 'Alto horno encendido', { tex: T('blast_top', 'blast_side', 'blast_top', 'blast_front_on'), hardness: 3.5, tool: 'pickaxe', needsTool: true, orient: true, light: 13, drops: 'blast_furnace', noItem: true });
+block('barrel', 'Barril', { tex: T('barrel_top', 'barrel_side', 'barrel_bottom'), hardness: 2.5, tool: 'axe', sound: 'wood' });
+block('composter', 'Compostador', { tex: T('composter_top', 'composter_side', 'composter_bottom'), render: 'box', box: [0, 0, 0, 16, 16, 16], pass: 'cutout', opaque: false, hardness: 0.6, tool: 'axe', sound: 'wood' });
+block('lectern', 'Atril', { tex: T('lectern_top', 'lectern_side', 'oak_planks'), render: 'box', box: [0, 0, 0, 16, 14, 16], opaque: false, hardness: 2.5, tool: 'axe', orient: true, sound: 'wood' });
+for (let i = 0; i < 4; i++) block(`nether_wart_${i}`, 'Verruga del Nether', { render: 'cross', hardness: 0, noItem: true, sound: 'grass', drops: () => [['nether_wart', i === 3 ? 2 + Math.floor(Math.random() * 3) : 1]] });
 block('spawner', 'Generador de monstruos', { render: 'cube', pass: 'cutout', opaque: false, hardness: 5, tool: 'pickaxe', needsTool: true, drops: null, light: 0 });
 block('path', 'Camino de tierra', { tex: T('path_top', 'path_side', 'dirt'), render: 'box', box: [0, 0, 0, 16, 15, 16], pass: 'opaque', opaque: false, hardness: 0.65, tool: 'shovel', drops: 'dirt', sound: 'grass' });
 block('fire', 'Fuego', { render: 'cross', solid: false, opaque: false, hardness: 0, noItem: true, drops: null, light: 15, replaceable: true });
@@ -258,6 +277,14 @@ item('bucket', 'Cubo', { stack: 16 });
 item('water_bucket', 'Cubo de agua', { stack: 1 });
 item('lava_bucket', 'Cubo de lava', { stack: 1 });
 item('milk_bucket', 'Cubo de leche', { stack: 1, food: [0, 0], milk: true });
+item('glass_bottle', 'Frasco de cristal');
+item('potion', 'Poción', { stack: 1, kind: 'potion' });
+item('splash_potion', 'Poción arrojadiza', { stack: 1, kind: 'potion', splash: true });
+item('experience_bottle', 'Frasco de experiencia');
+item('enchanted_book', 'Libro encantado', { stack: 1 });
+item('name_tag', 'Etiqueta');
+for (const [n, d] of [['nether_wart', 'Verruga del Nether'], ['spider_eye', 'Ojo de araña'], ['fermented_spider_eye', 'Ojo de araña fermentado'], ['glistering_melon_slice', 'Rodaja de sandía reluciente'], ['magma_cream', 'Crema de magma'], ['rabbit_foot', 'Pata de conejo'], ['phantom_membrane', 'Membrana de phantom'], ['turtle_scute', 'Escama de tortuga'], ['lapis_dummy', 'x']]) if (n !== 'lapis_dummy') item(n, d);
+item('golden_carrot', 'Zanahoria dorada', { food: [6, 14.4] });
 const FOOD = [
   ['apple', 'Manzana', 4, 2.4], ['golden_apple', 'Manzana dorada', 4, 9.6], ['bread', 'Pan', 5, 6], ['porkchop', 'Chuleta de cerdo cruda', 3, 1.8],
   ['cooked_porkchop', 'Chuleta de cerdo cocinada', 8, 12.8], ['beef', 'Filete crudo', 3, 1.8], ['cooked_beef', 'Filete', 8, 12.8],
@@ -277,6 +304,12 @@ for (const m of Object.keys(SPAWN_EGG_COLORS)) item(`${m}_spawn_egg`, `Huevo gen
 export function itemDef(id) { return ITEMS[id]; }
 export function isBlockItem(id) { return id < BLOCK_LIMIT && !!BLOCKS[id]; }
 export function maxStack(id) { return ITEMS[id]?.stack ?? 64; }
+// Two stacks can merge when same item, undamaged and with identical extra data (enchantments, potion, name)
+export function sameKind(a, b) {
+  if (!a || !b || a.id !== b.id || a.dmg || b.dmg) return false;
+  return JSON.stringify(a.data ?? null) === JSON.stringify(b.data ?? null);
+}
+export function copyStack(s, count = s?.count) { return s ? { id: s.id, count, dmg: s.dmg ?? 0, ...(s.data ? { data: JSON.parse(JSON.stringify(s.data)) } : {}) } : null; }
 
 // ---------------------------------------------------------------- recipes
 const TAGS = {
@@ -318,7 +351,6 @@ for (const [m, mat] of Object.entries(ARMOR_MAT)) {
   shaped(`${m}_leggings`, 1, ['###', '# #', '# #'], { '#': mat });
   shaped(`${m}_boots`, 1, ['# #', '# #'], { '#': mat });
 }
-for (const t of ['sword', 'pickaxe', 'axe', 'shovel', 'hoe', 'helmet', 'chestplate', 'leggings', 'boots']) shapeless(`netherite_${t}`, 1, [`diamond_${t}`, 'netherite_ingot']);
 shapeless('netherite_ingot', 1, ['netherite_scrap', 'netherite_scrap', 'netherite_scrap', 'netherite_scrap', 'gold_ingot', 'gold_ingot', 'gold_ingot', 'gold_ingot']);
 shaped('furnace', 1, ['###', '# #', '###'], { '#': '#stone_mat' });
 shaped('chest', 1, ['###', '# #', '###'], { '#': '#planks' });
@@ -363,6 +395,27 @@ shaped('nether_brick_fence', 6, ['###', '###'], { '#': 'nether_bricks' });
 shaped('glass_pane', 16, ['###', '###'], { '#': 'glass' });
 shaped('iron_bars', 16, ['###', '###'], { '#': 'iron_ingot' });
 shaped('lantern', 1, ['nnn', 'ntn', 'nnn'], { n: 'iron_nugget', t: 'torch' });
+shaped('enchanting_table', 1, [' b ', 'dod', 'ooo'], { b: 'book', d: 'diamond', o: 'obsidian' });
+shaped('anvil', 1, ['BBB', ' i ', 'iii'], { B: 'iron_block', i: 'iron_ingot' });
+shaped('brewing_stand', 1, [' r ', 'ccc'], { r: 'blaze_rod', c: '#stone_mat' });
+shaped('cauldron', 1, ['i i', 'i i', 'iii'], { i: 'iron_ingot' });
+shaped('grindstone', 1, ['sSs', 'p p'], { s: 'stick', S: 'stone_slab', p: '#planks' });
+shaped('smithing_table', 1, ['ii', 'pp', 'pp'], { i: 'iron_ingot', p: '#planks' });
+shaped('stonecutter', 1, [' i ', 'sss'], { i: 'iron_ingot', s: 'stone' });
+shaped('loom', 1, ['ss', 'pp'], { s: 'string', p: '#planks' });
+shaped('cartography_table', 1, ['aa', 'pp', 'pp'], { a: 'paper', p: '#planks' });
+shaped('fletching_table', 1, ['ff', 'pp', 'pp'], { f: 'flint', p: '#planks' });
+shaped('smoker', 1, [' l ', 'lfl', ' l '], { l: '#log', f: 'furnace' });
+shaped('blast_furnace', 1, ['iii', 'ifi', 'sss'], { i: 'iron_ingot', f: 'furnace', s: 'smooth_stone' });
+shaped('barrel', 1, ['psp', 'p p', 'psp'], { p: '#planks', s: 'oak_slab' });
+shaped('composter', 1, ['s s', 's s', 'sss'], { s: 'oak_slab' });
+shaped('lectern', 1, ['sss', ' b ', ' s '], { s: 'oak_slab', b: 'bookshelf' });
+shaped('glass_bottle', 3, ['g g', ' g '], { g: 'glass' });
+shapeless('fermented_spider_eye', 1, ['spider_eye', 'brown_mushroom', 'sugar']);
+shaped('glistering_melon_slice', 1, ['nnn', 'nmn', 'nnn'], { n: 'gold_nugget', m: 'melon_slice' });
+shapeless('magma_cream', 1, ['blaze_powder', 'slime_ball']);
+shaped('golden_carrot', 1, ['nnn', 'ncn', 'nnn'], { n: 'gold_nugget', c: 'carrot' });
+shaped('name_tag', 1, [' s', 'p '], { s: 'string', p: 'paper' });
 shaped('ladder', 3, ['s s', 'sss', 's s'], { s: 'stick' });
 shapeless('jack_o_lantern', 1, ['pumpkin', 'torch']);
 shapeless('bone_meal', 3, ['bone']);
@@ -423,6 +476,7 @@ export function matchRecipe(grid, n) {
   return null;
 }
 
+export const SMOKER_OK = new Set(['porkchop', 'beef', 'chicken', 'mutton', 'potato', 'cod', 'salmon', 'rabbit']);
 export const SMELTING = {
   raw_iron: 'iron_ingot', raw_gold: 'gold_ingot', raw_copper: 'copper_ingot', iron_ore: 'iron_ingot', gold_ore: 'gold_ingot', copper_ore: 'copper_ingot',
   sand: 'glass', red_sand: 'glass', cobblestone: 'stone', stone: 'smooth_stone', clay_ball: 'brick', clay: 'terracotta', netherrack: 'nether_brick',

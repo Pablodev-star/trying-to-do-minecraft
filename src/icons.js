@@ -23,15 +23,25 @@ function texCanvas(b, side) {
   return c;
 }
 
-export function iconFor(id) {
-  if (cache.has(id)) return cache.get(id);
+export function iconFor(id, tint = null) {
+  const key = tint != null ? id + ':' + tint : id;
+  if (cache.has(key)) return cache.get(key);
   const c = document.createElement('canvas'); c.width = c.height = SIZE;
   const g = c.getContext('2d');
   g.imageSmoothingEnabled = false;
   const it = ITEMS[id];
   const sprite = it && itemSpriteCanvas(it.name);
   const b = id < 1024 ? BLOCKS[id] : null;
-  if (sprite) g.drawImage(sprite, 0, 0, SIZE, SIZE);
+  if (sprite) {
+    g.drawImage(sprite, 0, 0, SIZE, SIZE);
+    if (tint != null) {
+      const ov = itemSpriteCanvas('potion_overlay');
+      const tc = document.createElement('canvas'); tc.width = tc.height = 16;
+      const tg = tc.getContext('2d');
+      tg.drawImage(ov, 0, 0); tg.globalCompositeOperation = 'source-in'; tg.fillStyle = '#' + tint.toString(16).padStart(6, '0'); tg.fillRect(0, 0, 16, 16);
+      g.drawImage(tc, 0, 0, SIZE, SIZE);
+    }
+  }
   else if (b && b.shape === 'fence') {
     const tc = tileCanvas(b.tex);
     g.save(); g.beginPath();
@@ -67,6 +77,6 @@ export function iconFor(id) {
     g.restore();
   }
   const url = c.toDataURL();
-  cache.set(id, url);
+  cache.set(key, url);
   return url;
 }

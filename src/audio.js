@@ -87,6 +87,8 @@ export function playSound(name, vol = 1) {
     case 'crit': burst({ freq: 3000, q: 2, dur: 0.1, vol: 0.2 }); break;
     case 'break_tool': burst({ freq: 3500, q: 4, dur: 0.25, vol: 0.25 }); break;
     case 'glass': playSound('break:glass'); break;
+    case 'anvil': tone({ freq: 1800, freq2: 1500, dur: 0.35, vol: 0.18, type: 'square' }); tone({ freq: 2700, dur: 0.25, vol: 0.08, type: 'triangle' }); break;
+    case 'grind': burst({ freq: 2500, q: 2, dur: 0.4, vol: 0.2 }); break;
     case 'rain': burst({ freq: 7000, q: 0.3, dur: 0.4, vol: 0.035 * vol, type: 'highpass' }); break;
     case 'thunder': burst({ freq: 120, q: 0.3, dur: 2.8, vol: 0.9 * vol, type: 'lowpass' }); burst({ freq: 400, q: 0.4, dur: 1.2, vol: 0.35 * vol, at: 0.05 }); burst({ freq: 90, q: 0.3, dur: 2.0, vol: 0.5 * vol, type: 'lowpass', at: 0.6 }); break;
     case 'dragon': tone({ freq: 90, freq2: 60, dur: 1.5, vol: 0.3, type: 'sawtooth' }); break;
