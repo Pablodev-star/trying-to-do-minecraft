@@ -4,12 +4,14 @@ import { BLOCKS, B, ITEMS, I, SMELTING, fuelTime } from './registry.js';
 import { World, worldUniforms, CS, CH, SOLID, OPAQUE } from './world.js';
 import { BIOMES } from './worldgen.js';
 import { Player } from './player.js';
-import { Mob, ItemEntity, FallingBlock, PrimedTNT, Projectile, EndCrystal, makeItemMesh, MOB_INFO } from './entities.js';
+import { Mob, ItemEntity, FallingBlock, PrimedTNT, Projectile, EndCrystal, XPOrb, makeItemMesh, MOB_INFO } from './entities.js';
 import { buildModel } from './models.js';
 import { UI, escapeHtml } from './ui.js';
 import { tileCanvas, atlasCanvas } from './textures.js';
 import { playSound, audio, unlockAudio, startMusic } from './audio.js';
 import { hashString } from './noise.js';
+import { blockBoxesAt } from './shapes.js';
+import { ShaderPipeline, makeSkyDome } from './shaders.js';
 import { TouchControls, IS_TOUCH } from './touch.js';
 
 const $ = (s) => document.querySelector(s);
@@ -52,7 +54,11 @@ class Game {
     this.running = false;
     this.achievements = new Set();
     this.stats = { broken: 0, placed: 0, kills: 0 };
+    this.weather = { rain: 0, target: 0, thunder: false, timer: 200 + Math.random() * 400, forced: false };
+    this.flash = 0;
+    this.dropGround = [];
     this.buildSky();
+    try { this.pipeline = new ShaderPipeline(this.renderer, worldUniforms); } catch (e) { console.warn('Shaders no disponibles', e); this.pipeline = null; }
     this.buildHelpers();
     this.ui = new UI(this);
     this.touchControls = IS_TOUCH ? new TouchControls(this) : null;
@@ -85,6 +91,7 @@ class Game {
 
   // ---------------------------------------------------------------- options
   applyGuiScale() { document.documentElement.style.setProperty('--s', this.options.guiScale); }
+  remeshAll() { if (this.world) for (const c of this.world.chunks.values()) c.meshDirty = true; }
   saveOptions() { try { localStorage.setItem('mc_options', JSON.stringify(this.options)); } catch { /* ignore */ } audio.volume = this.options.volume / 100; this.applyGuiScale(); }
   get difficulty() { return this.options.difficulty; }
   get difficultyMul() { return { peaceful: 0, easy: 0.5, normal: 1, hard: 1.5 }[this.options.difficulty]; }
@@ -94,6 +101,7 @@ class Game {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = this.handCamera.aspect = w / h;
     this.camera.updateProjectionMatrix(); this.handCamera.updateProjectionMatrix();
+    this.pipeline?.setSize(w, h);
   }
 
   // ---------------------------------------------------------------- sky
@@ -129,6 +137,15 @@ class Game {
     this.clouds.rotation.x = -Math.PI / 2;
     this.clouds.position.y = 130;
     this.scene.add(this.clouds);
+    this.skyDome = makeSkyDome(worldUniforms);
+    this.scene.add(this.skyDome);
+    const N = 1600;
+    const pg = new THREE.BufferGeometry();
+    pg.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(N * 6).fill(-999), 3));
+    this.precip = new THREE.LineSegments(pg, new THREE.LineBasicMaterial({ color: 0x9ab8e8, transparent: true, opacity: 0.5, depthWrite: false }));
+    this.precip.frustumCulled = false;
+    this.precip.visible = false;
+    this.scene.add(this.precip);
   }
 
   buildHelpers() {
@@ -252,6 +269,9 @@ class Game {
     this.dimData = save?.dims ?? {};
     this.time = save?.time ?? 1000;
     this.dragonKilled = save?.dragonKilled ?? false;
+    this.villagesSpawned = new Set(save?.villagesSpawned ?? []);
+    if (save?.weather) Object.assign(this.weather, save.weather, { rain: save.weather.target });
+    else Object.assign(this.weather, { rain: 0, target: 0, thunder: false, timer: 300 + Math.random() * 400 });
     this.keepInventory = save?.keepInventory ?? false;
     this.achievements = new Set(save?.achievements ?? []);
     this.stats = save?.stats ?? { broken: 0, placed: 0, kills: 0 };
@@ -268,7 +288,7 @@ class Game {
       p.inventory = ps.inventory; p.armor = ps.armor; p.selected = ps.selected ?? 0; p.mode = ps.mode ?? meta.mode;
       p.spawnPoint = ps.spawnPoint; p.flying = ps.flying ?? false;
       this.loadChunksAround(true);
-      for (const m of save.mobs ?? []) { const e = this.spawnMob(m.type, m.x, m.y, m.z, { baby: m.baby, woolColor: m.wool }); if (e) { e.tamed = m.tamed; if (m.tamed) e.owner = this.player; if (m.sheared) e.shear(); } }
+      for (const m of save.mobs ?? []) { const e = this.spawnMob(m.type, m.x, m.y, m.z, { baby: m.baby, woolColor: m.wool }); if (e) { e.tamed = m.tamed; e.home = m.home; if (m.tamed) e.owner = this.player; if (m.sheared) e.shear(); } }
     } else if (this.player.mode === 'creative') this.player.give(I.grass_block, 1);
     this.running = true;
     this.ui.screen = null;
@@ -284,7 +304,7 @@ class Game {
   enterDimension(dim, newPlayer = false) {
     if (this.world) {
       this.dimData[this.dim] = this.world.serialize();
-      for (const e of this.entities) this.scene.remove(e.mesh);
+      for (const e of this.entities) { this.scene.remove(e.mesh); if (e.home) this.villagesSpawned?.delete(e.home); }
       this.entities = [];
       this.scene.remove(this.world.group); this.world.dispose();
     }
@@ -512,9 +532,10 @@ class Game {
     const dims = { ...this.dimData, [this.dim]: this.world.serialize() };
     const p = this.player;
     const mobs = this.entities.filter((e) => e instanceof Mob && !e.dead && !e.hostile && e.type !== 'ender_dragon' && e.pos.distanceTo(p.pos) < 96)
-      .map((e) => ({ type: e.type, x: e.pos.x, y: e.pos.y, z: e.pos.z, baby: e.baby, tamed: e.tamed, sheared: e.sheared, wool: e.woolColor }));
+      .map((e) => ({ type: e.type, x: e.pos.x, y: e.pos.y, z: e.pos.z, baby: e.baby, tamed: e.tamed, sheared: e.sheared, wool: e.woolColor, home: e.home }));
+    const keptVillages = this.dim === 'overworld' ? [...new Set(mobs.map((m) => m.home).filter(Boolean))] : [...this.villagesSpawned];
     const data = {
-      version: 1, seed: this.seed, time: this.time, dims, dragonKilled: this.dragonKilled, keepInventory: this.keepInventory,
+      version: 1, seed: this.seed, time: this.time, dims, villagesSpawned: keptVillages, weather: { target: this.weather.target, thunder: this.weather.thunder, timer: this.weather.timer }, dragonKilled: this.dragonKilled, keepInventory: this.keepInventory,
       achievements: [...this.achievements], stats: this.stats, mobs: this.dim === 'overworld' ? mobs : [],
       player: { pos: [p.pos.x, p.pos.y, p.pos.z], yaw: p.yaw, pitch: p.pitch, health: p.health, food: p.food, saturation: p.saturation, xp: p.xp, level: p.level, inventory: p.inventory, armor: p.armor, selected: p.selected, mode: p.mode, dim: this.dim, spawnPoint: p.spawnPoint, flying: p.flying },
     };
@@ -553,6 +574,14 @@ class Game {
     e.pickupDelay = 1.5;
     this.addEntity(e);
   }
+  spawnXP(x, y, z, amount) {
+    amount = Math.round(amount);
+    while (amount > 0) {
+      const v = amount >= 17 ? 17 : amount >= 7 ? 7 : amount >= 3 ? 3 : 1;
+      amount -= v;
+      this.addEntity(new XPOrb(this, x, y, z, v));
+    }
+  }
   spawnFallingBlock(x, y, z, id) { this.world.setBlock(x, y, z, 0, 0, { noUpdate: false }); this.addEntity(new FallingBlock(this, x, y, z, id)); }
   dropBlockItems(x, y, z, id) { this.dropsFor(id, true).forEach((s) => this.spawnItem(x + 0.5, y + 0.3, z + 0.5, s)); }
   dropTileItems(x, y, z, items) { for (const s of items) if (s) this.spawnItem(x + 0.5, y + 0.5, z + 0.5, s, true); }
@@ -582,7 +611,7 @@ class Game {
     if (this.player.mode === 'survival') {
       for (const s of this.dropsFor(id, canHarvest)) this.spawnItem(x + 0.5, y + 0.3, z + 0.5, s);
       const xp = { coal_ore: 1, diamond_ore: 5, emerald_ore: 5, lapis_ore: 3, redstone_ore: 2, nether_quartz_ore: 2, nether_gold_ore: 1 }[b.name];
-      if (xp && canHarvest) this.player.addXP(xp);
+      if (xp && canHarvest) this.spawnXP(x + 0.5, y + 0.5, z + 0.5, xp);
       this.stats.broken++;
       if (b.name.endsWith('_log')) this.achieve('¡Consigue madera!');
       if (b.name === 'diamond_ore' && canHarvest) this.achieve('¡Diamantes!');
@@ -647,9 +676,63 @@ class Game {
       if (type === 'chest' && this.dim === 'overworld' && this.world.gen.stronghold && Math.abs(x - this.world.gen.stronghold.x) < 8 && Math.abs(z - this.world.gen.stronghold.z) < 8 && !this.world.tiles.has(k)) {
         t.items[3] = { id: I.ender_pearl, count: 2, dmg: 0 }; t.items[7] = { id: I.iron_ingot, count: 4, dmg: 0 }; t.items[12] = { id: I.bread, count: 3, dmg: 0 }; t.items[20] = { id: I.blaze_rod, count: 1, dmg: 0 };
       }
+      if (type === 'chest' && !this.world.tiles.has(k) && (this.world.getMeta(x, y, z) & 4)) this.fillLoot(t.items);
       this.world.tiles.set(k, t);
     }
     return t;
+  }
+
+  fillLoot(items) {
+    const table = [
+      ['bread', 1, 4, 0.6], ['wheat', 2, 6, 0.4], ['iron_ingot', 1, 4, 0.45], ['gold_ingot', 1, 3, 0.3], ['diamond', 1, 2, 0.1],
+      ['emerald', 1, 3, 0.15], ['coal', 3, 10, 0.5], ['bone', 2, 6, 0.4], ['rotten_flesh', 1, 6, 0.4], ['string', 1, 4, 0.3],
+      ['gunpowder', 1, 4, 0.3], ['redstone', 2, 6, 0.3], ['apple', 1, 3, 0.4], ['saddle', 1, 1, 0.15], ['golden_apple', 1, 1, 0.05],
+      ['iron_pickaxe', 1, 1, 0.08], ['bucket', 1, 1, 0.15], ['wheat_seeds', 2, 5, 0.4], ['book', 1, 3, 0.2], ['ender_pearl', 1, 1, 0.08],
+    ];
+    for (const [name, a, b, p] of table) {
+      if (Math.random() > p) continue;
+      let slot = Math.floor(Math.random() * 27); let tries = 0;
+      while (items[slot] && tries++ < 30) slot = Math.floor(Math.random() * 27);
+      items[slot] = { id: I[name], count: a + Math.floor(Math.random() * (b - a + 1)), dmg: 0 };
+    }
+  }
+
+  // Mob spawners from dungeons and villages populating themselves
+  structureTick() {
+    const p = this.player, w = this.world;
+    if (!p || this.dim !== 'overworld') return;
+    // spawners
+    for (const k of w.spawners) {
+      const [x, y, z] = k.split(',').map(Number);
+      if (w.getBlock(x, y, z) !== B.spawner) { w.spawners.delete(k); continue; }
+      const d = Math.hypot(x + 0.5 - p.pos.x, y - p.pos.y, z + 0.5 - p.pos.z);
+      if (d > 16) continue;
+      this.particles.spawn(x + Math.random(), y + Math.random(), z + Math.random(), new THREE.Color(0xff7a20), new THREE.Vector3(0, 0.6, 0), 0.5, 0.06, 0);
+      if (this.difficulty === 'peaceful' || Math.random() > 0.08) continue;
+      const near = this.entities.filter((e) => e instanceof Mob && !e.dead && e.pos.distanceTo(new THREE.Vector3(x, y, z)) < 9).length;
+      if (near >= 5) continue;
+      const type = ['zombie', 'skeleton', 'spider'][(w.getMeta(x, y, z) || 1) - 1] ?? 'zombie';
+      for (let i = 0; i < 4; i++) {
+        const sx = x + Math.floor((Math.random() - 0.5) * 7), sz = z + Math.floor((Math.random() - 0.5) * 7);
+        if (!w.getBlock(sx, y, sz) && !w.getBlock(sx, y + 1, sz) && SOLID[w.getBlock(sx, y - 1, sz)]) { this.spawnMob(type, sx + 0.5, y, sz + 0.5); this.particles.burst(sx + 0.5, y + 0.5, sz + 0.5, 0x606060); break; }
+      }
+    }
+    // villages: populate the first time the player comes close
+    for (const v of w.gen.villagesNear(p.pos.x, p.pos.z)) {
+      if (this.villagesSpawned.has(v.id) || Math.hypot(v.x - p.pos.x, v.z - p.pos.z) > 70) continue;
+      if (!w.isLoaded(v.x, v.z)) continue;
+      this.villagesSpawned.add(v.id);
+      const count = 3 + v.buildings.filter((b) => b.kind !== 'farm').length;
+      for (let i = 0; i < count; i++) {
+        const b = v.buildings[i % v.buildings.length];
+        const sx = Math.floor((b.x + v.x) / 2) + (i % 3) - 1, sz = Math.floor((b.z + v.z) / 2);
+        const sy = w.surfaceY(sx, sz);
+        if (sy > 0) { const e = this.spawnMob('villager', sx + 0.5, sy + 1, sz + 0.5, { baby: Math.random() < 0.2 }); if (e) e.home = v.id; }
+      }
+      const gy = w.surfaceY(v.x + 4, v.z + 4);
+      if (gy > 0) { const e = this.spawnMob('iron_golem', v.x + 4.5, gy + 1, v.z + 4.5); if (e) e.home = v.id; }
+      this.achieve('¡Una aldea!');
+    }
   }
 
   tickFurnaces() {
@@ -697,7 +780,7 @@ class Game {
       if (!(e instanceof Mob) || e.dead) continue;
       const d = e.pos.distanceTo(p.pos);
       if (e.type === 'ender_dragon') continue;
-      if (d > 128 || (e.hostile && this.difficulty === 'peaceful')) { e.remove = true; continue; }
+      if (d > 128 || (e.hostile && this.difficulty === 'peaceful')) { e.remove = true; if (e.home) this.villagesSpawned.delete(e.home); continue; }
       if (e.hostile && d > 48 && Math.random() < 0.02) { e.remove = true; continue; }
       if (e.hostile) hostile++; else passive++;
     }
@@ -1023,7 +1106,14 @@ class Game {
       case 'difficulty': if (['peaceful', 'easy', 'normal', 'hard'].includes(args[0])) { this.options.difficulty = args[0]; this.saveOptions(); this.chat('Dificultad: ' + args[0]); } else this.chat('Uso: /difficulty <peaceful|easy|normal|hard>'); break;
       case 'xp': { const n = Number(args[0]) || 0; if (String(args[0]).endsWith('L')) for (let i = 0; i < parseInt(args[0], 10); i++) p.addXP(xpForLevelLocal(p.level)); else p.addXP(n); this.chat('Experiencia añadida'); break; }
       case 'spawnpoint': p.spawnPoint = { x: Math.floor(p.pos.x), y: Math.floor(p.pos.y), z: Math.floor(p.pos.z) }; this.worldSpawn = p.spawnPoint; this.chat('Punto de reaparición establecido'); break;
-      case 'locate': { const s = this.world.gen.stronghold; this.chat(this.dim === 'overworld' ? `Fortaleza más cercana en ${s.x}, ~, ${s.z}` : 'Solo en el mundo normal'); break; }
+      case 'locate': {
+        if (this.dim !== 'overworld') { this.chat('Solo en el mundo normal'); break; }
+        if (args[0] === 'village' || args[0] === 'aldea') {
+          const vs = this.world.gen.villagesNear(p.pos.x, p.pos.z, 3).sort((a, b) => Math.hypot(a.x - p.pos.x, a.z - p.pos.z) - Math.hypot(b.x - p.pos.x, b.z - p.pos.z));
+          this.chat(vs.length ? `Aldea más cercana en ${vs[0].x}, ${vs[0].h}, ${vs[0].z}` : 'No hay aldeas cerca');
+        } else { const s = this.world.gen.stronghold; this.chat(`Fortaleza más cercana en ${s.x}, ~, ${s.z} (usa /locate village para aldeas)`); }
+        break;
+      }
       case 'clear': p.inventory.fill(null); this.ui.refresh(); this.chat('Inventario vaciado'); break;
       case 'gamerule': if (args[0] === 'keepInventory') { this.keepInventory = args[1] === 'true'; this.chat('keepInventory = ' + this.keepInventory); } else this.chat('Reglas: keepInventory'); break;
       case 'setblock': {
@@ -1033,53 +1123,91 @@ class Game {
         this.world.setBlock(Math.floor(x), Math.floor(y), Math.floor(z), id); break;
       }
       case 'heal': p.health = 20; p.food = 20; p.saturation = 5; this.ui.refresh(); break;
-      case 'weather': this.chat('El clima siempre es despejado en esta versión.'); break;
+      case 'weather': {
+        const v = args[0];
+        if (!['clear', 'rain', 'thunder'].includes(v)) { this.chat('Uso: /weather <clear|rain|thunder> [segundos]'); break; }
+        this.weather.target = v === 'clear' ? 0 : 1;
+        this.weather.thunder = v === 'thunder';
+        this.weather.timer = Number(args[1]) || 300 + Math.random() * 600;
+        this.chat({ clear: 'El tiempo se ha despejado', rain: 'Empieza a llover', thunder: 'Se acerca una tormenta' }[v]);
+        break;
+      }
       case 'dimension': case 'dim': if (['overworld', 'nether', 'end'].includes(args[0])) this.travel(args[0]); else this.chat('Uso: /dimension <overworld|nether|end>'); break;
       default: this.chat('Comando desconocido. Escribe /help');
     }
   }
 
   // ---------------------------------------------------------------- per-frame updates
-  updateSky() {
+  updateSky(dt = 0) {
     const t = this.time % 24000;
     const angle = (t / 24000) * Math.PI * 2; // 0 = sunrise
     let bright = Math.sin(angle) * 2 + 0.5;
     bright = Math.max(0, Math.min(1, bright));
     const d = this.dim;
-    const fog = worldUniforms.fogColor.value;
+    const U = worldUniforms;
+    const fog = U.fogColor.value;
+    const wx = this.weather;
+    // weather fades in/out smoothly
+    wx.rain += Math.sign(wx.target - wx.rain) * Math.min(Math.abs(wx.target - wx.rain), dt * 0.2);
+    const rain = d === 'overworld' ? wx.rain : 0;
+    U.rain.value = rain;
+    U.cameraPos.value.copy(this.camera.position);
+    const sunUp = Math.sin(angle);
     if (d === 'overworld') {
-      this.daylightLevel = 0.2 + 0.8 * bright;
-      worldUniforms.daylight.value = this.daylightLevel;
+      this.daylightLevel = (0.2 + 0.8 * bright) * (1 - 0.35 * rain) + this.flash * 0.8;
+      U.daylight.value = this.daylightLevel;
       const day = new THREE.Color(0x9fc6ff), night = new THREE.Color(0x0a0c18), sunset = new THREE.Color(0xf0904a);
       const c = night.clone().lerp(day, bright);
-      const s = Math.max(0, 1 - Math.abs(Math.sin(angle)) * 4) * (Math.cos(angle) > -2 ? 1 : 0);
+      const s = Math.max(0, 1 - Math.abs(Math.sin(angle)) * 4);
       c.lerp(sunset, s * 0.35);
+      const gray = new THREE.Color(0x6a7280).multiplyScalar(0.25 + 0.75 * bright);
+      c.lerp(gray, rain * 0.75);
+      if (this.flash > 0) c.lerp(new THREE.Color(0xe8e8ff), this.flash);
+      const sky = new THREE.Color(0x4a82ff).lerp(new THREE.Color(0x060818), 1 - bright).lerp(gray, rain * 0.8);
       const p = this.player;
       if (p && p.headInWater) c.set(0x10308a);
       if (p && p.headInLava) c.set(0xc04000);
       fog.copy(c);
+      U.skyColor.value.copy(sky);
       this.scene.background = c;
+      // sun / moon light for shaders
+      const sunDir = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0.28).normalize();
+      const lightDir = sunUp > -0.05 ? sunDir : sunDir.clone().negate();
+      U.sunDir.value.copy(lightDir.y < 0.06 ? lightDir.clone().setY(0.06).normalize() : lightDir);
+      if (sunUp > -0.05) {
+        const low = Math.max(0, 1 - sunUp * 3);
+        U.sunColor.value.setRGB(1.0, 0.92 - low * 0.35, 0.8 - low * 0.55).multiplyScalar(Math.min(1, 0.25 + sunUp * 3) * (1 - rain * 0.8));
+      } else U.sunColor.value.setRGB(0.32, 0.38, 0.55).multiplyScalar(Math.min(1, -sunUp * 3) * (1 - rain * 0.8));
+      U.hasSky.value = 1;
+      U.shadowStrength.value = 1 - rain * 0.7;
       const cam = this.camera.position;
       this.skyGroup.position.copy(cam);
-      const sx = Math.cos(angle) * 300, sy = Math.sin(angle) * 300;
-      this.sun.position.set(sx, sy, 0); this.sun.lookAt(cam.clone().sub(this.skyGroup.position));
-      this.moon.position.set(-sx, -sy, 0); this.moon.lookAt(new THREE.Vector3());
-      this.sun.lookAt(new THREE.Vector3());
-      this.stars.material.opacity = Math.max(0, 1 - bright * 1.5);
+      this.skyDome.position.copy(cam);
+      this.skyDome.visible = true;
+      const sx = Math.cos(angle) * 300, sy = Math.sin(angle) * 300, sz = 0.28 * 300;
+      this.sun.position.set(sx, sy, sz); this.sun.lookAt(new THREE.Vector3());
+      this.moon.position.set(-sx, -sy, -sz); this.moon.lookAt(new THREE.Vector3());
+      this.sun.material.opacity = 1 - rain; this.moon.material.opacity = 1 - rain;
+      this.stars.material.opacity = Math.max(0, 1 - bright * 1.5) * (1 - rain);
       this.skyGroup.visible = true;
       this.clouds.visible = this.options.clouds;
       this.clouds.position.set(cam.x, 130, cam.z);
       this.clouds.material.map.offset.set((cam.x / 2048 * 4) + this.time * 0.00002, cam.z / 2048 * 4);
-      this.clouds.material.color.setScalar(0.3 + 0.7 * bright);
-      this.ambient.intensity = 0.25 + 0.5 * bright;
-      this.sunLight.intensity = 0.2 + 0.5 * bright;
+      this.clouds.material.color.setScalar((0.3 + 0.7 * bright) * (1 - rain * 0.45));
+      this.clouds.material.opacity = 0.8 + rain * 0.2;
+      this.ambient.intensity = (0.25 + 0.5 * bright) * (1 - rain * 0.3);
+      this.sunLight.intensity = (0.2 + 0.5 * bright) * (1 - rain * 0.5);
     } else {
       this.daylightLevel = 0;
-      worldUniforms.daylight.value = 0;
+      U.daylight.value = 0;
+      U.hasSky.value = 0;
+      U.sunColor.value.setRGB(0, 0, 0);
       const c = new THREE.Color(d === 'nether' ? 0x3a0d0d : 0x15101e);
       if (this.player?.headInLava) c.set(0xc04000);
       fog.copy(c);
+      U.skyColor.value.copy(c);
       this.scene.background = c;
+      this.skyDome.visible = false;
       this.skyGroup.visible = d === 'end';
       if (d === 'end') { this.skyGroup.position.copy(this.camera.position); this.sun.visible = this.moon.visible = false; this.stars.material.opacity = 0.5; }
       this.clouds.visible = false;
@@ -1088,9 +1216,71 @@ class Game {
     if (d === 'overworld') { this.sun.visible = this.moon.visible = true; }
     const rd = (this.player ? this.options.renderDistance : 5) * CS;
     const p = this.player;
-    if (p && (p.headInWater || p.headInLava)) { worldUniforms.fogNear.value = 0; worldUniforms.fogFar.value = p.headInLava ? 3 : 18; }
-    else if (d === 'nether') { worldUniforms.fogNear.value = 10; worldUniforms.fogFar.value = Math.min(rd, 72); }
-    else { worldUniforms.fogNear.value = rd * 0.55; worldUniforms.fogFar.value = rd * 0.95; }
+    if (p && (p.headInWater || p.headInLava)) { U.fogNear.value = 0; U.fogFar.value = p.headInLava ? 3 : 18; }
+    else if (d === 'nether') { U.fogNear.value = 10; U.fogFar.value = Math.min(rd, 72); }
+    else { U.fogNear.value = rd * (0.55 - rain * 0.25); U.fogFar.value = rd * (0.95 - rain * 0.2); }
+  }
+
+  // ---------------------------------------------------------------- weather
+  updateWeather(dt) {
+    const wx = this.weather;
+    if (!this.player || this.dim !== 'overworld') { this.precip.visible = false; return; }
+    wx.timer -= dt;
+    if (wx.timer <= 0 && !wx.forced) {
+      // random weather cycle (roughly like the original: long clear spells, shorter storms)
+      const raining = wx.target > 0;
+      wx.target = raining ? 0 : 1;
+      wx.thunder = !raining && Math.random() < 0.3;
+      wx.timer = raining ? 300 + Math.random() * 600 : 120 + Math.random() * 240;
+    }
+    this.flash = Math.max(0, this.flash - dt * 3);
+    if (wx.thunder && wx.rain > 0.7 && Math.random() < dt / 12) {
+      this.flash = 1;
+      setTimeout(() => this.sfx('thunder'), 300 + Math.random() * 1500);
+      // lightning may ignite the ground near the player
+      const p = this.player;
+      const lx = Math.floor(p.pos.x + (Math.random() - 0.5) * 60), lz = Math.floor(p.pos.z + (Math.random() - 0.5) * 60);
+      if (this.world.isLoaded(lx, lz)) { const ly = this.world.surfaceY(lx, lz); if (ly > 0 && !this.world.getBlock(lx, ly + 1, lz)) this.world.setBlock(lx, ly + 1, lz, B.fire); }
+    }
+    const rain = wx.rain;
+    const pts = this.precip;
+    pts.visible = rain > 0.02;
+    if (!pts.visible) return;
+    const p = this.player.pos;
+    const biome = this.world.biomeAt(Math.floor(p.x), Math.floor(p.z));
+    const snow = biome === 7 || p.y > 105 || (biome === 5 && p.y > 90);
+    const desert = biome === 6 || biome === 10;
+    if (desert) { pts.visible = false; return; }
+    const pos = pts.geometry.attributes.position;
+    const n = pos.count / 2;
+    const active = Math.floor(n * rain);
+    const speed = snow ? 3 : 22;
+    for (let i = 0; i < n; i++) {
+      let x = pos.getX(i * 2), y = pos.getY(i * 2), z = pos.getZ(i * 2);
+      const far = Math.abs(x - p.x) > 18 || Math.abs(z - p.z) > 18;
+      if (i >= active) { pos.setXYZ(i * 2, 0, -999, 0); pos.setXYZ(i * 2 + 1, 0, -999, 0); continue; }
+      y -= speed * dt;
+      if (snow) { x += Math.sin(this.time * 0.05 + i) * dt * 0.6; }
+      const ground = this.dropGround[i] ?? -999;
+      if (far || y < ground || y < p.y - 12) {
+        x = p.x + (Math.random() - 0.5) * 36; z = p.z + (Math.random() - 0.5) * 36; y = p.y + 8 + Math.random() * 14;
+        const gx = Math.floor(x), gz = Math.floor(z);
+        let top = this.world.isLoaded(gx, gz) ? this.world.surfaceY(gx, gz) + 1 : -999;
+        for (let yy = 127; yy > top; yy--) { const id = this.world.getBlock(gx, yy, gz); if (id && (OPAQUE[id] || BLOCKS[id].name.endsWith('_leaves'))) { top = yy + 1; break; } }
+        this.dropGround[i] = top;
+        if (top > y) y = -999;
+        if (!snow && top > p.y - 6 && Math.random() < 0.02) this.particles.spawn(x, top + 0.05, z, new THREE.Color(0x9ab4e0), new THREE.Vector3(0, 1.5, 0), 0.2, 0.05, 8);
+      }
+      const len = snow ? 0.12 : 0.7;
+      pos.setXYZ(i * 2, x, y, z);
+      pos.setXYZ(i * 2 + 1, x + (snow ? 0.08 : 0.02), y + len, z);
+    }
+    pos.needsUpdate = true;
+    pts.material.color.set(snow ? 0xffffff : 0x9ab8e8);
+    pts.material.opacity = (snow ? 0.9 : 0.55) * Math.min(1, rain * 1.5);
+    pts.material.linewidth = 1;
+    this.rainSound = (this.rainSound ?? 0) - dt;
+    if (!snow && this.rainSound <= 0) { this.rainSound = 0.35; this.sfx('rain'); }
   }
 
   updateCamera(dt) {
@@ -1190,9 +1380,15 @@ class Game {
     const h = p && !p.dead && p.mode !== 'spectator' ? p.pick() : null;
     if (h?.block) {
       const b = BLOCKS[h.block.id];
-      let box = b.box ? b.box.map((v) => v / 16) : b.render === 'cross' ? [0.15, 0, 0.15, 0.85, 0.8, 0.85] : [0, 0, 0, 1, 1, 1];
+      const { x, y, z } = h.block;
+      let box;
+      if (b.render === 'cross') box = [0.15, 0, 0.15, 0.85, 0.8, 0.85];
+      else if (b.box || b.shape) {
+        box = [1, 1, 1, 0, 0, 0];
+        for (const bx of blockBoxesAt(this.world, b, x, y, z)) for (let k = 0; k < 3; k++) { box[k] = Math.min(box[k], bx[k] - [x, y, z][k]); box[k + 3] = Math.max(box[k + 3], bx[k + 3] - [x, y, z][k]); }
+      } else box = [0, 0, 0, 1, 1, 1];
       this.selBox.visible = true;
-      this.selBox.position.set(h.block.x + (box[0] + box[3]) / 2, h.block.y + (box[1] + box[4]) / 2, h.block.z + (box[2] + box[5]) / 2);
+      this.selBox.position.set(x + (box[0] + box[3]) / 2, y + (box[1] + box[4]) / 2, z + (box[2] + box[5]) / 2);
       this.selBox.scale.set(box[3] - box[0], box[4] - box[1], box[5] - box[2]);
     } else this.selBox.visible = false;
     if (p?.mining) {
@@ -1226,14 +1422,14 @@ class Game {
     this.time++;
     this.world.tick();
     if (this.world.tickCount % 2 === 0) this.tickFurnaces();
-    if (this.world.tickCount % 20 === 0 && this.player && !this.player.dead) this.spawnTick();
+    if (this.world.tickCount % 20 === 0 && this.player && !this.player.dead) { this.spawnTick(); this.structureTick(); }
   }
 
   loop(now) {
     requestAnimationFrame((t) => this.loop(t));
     let dt = (now - this.last) / 1000;
     this.last = now;
-    if (dt > 0.1) dt = 0.1;
+    if (dt > 0.25) dt = 0.25; // keep the simulation real-time on slow devices (physics is sub-stepped)
     this.frames++; this.fpsTime += dt;
     if (this.fpsTime >= 1) { this.fps = this.frames; this.frames = 0; this.fpsTime = 0; }
     if (!this.world) return;
@@ -1269,15 +1465,30 @@ class Game {
     const pp = this.player?.pos ?? this.camera.position;
     this.world.processDirty(pp.x, pp.z, 6);
     this.updateCamera(dt);
-    this.updateSky();
+    this.updateSky(dt);
+    this.updateWeather(dt);
     if (this.player) { this.updateHand(dt); this.updateSelection(); }
     worldUniforms.time.value = now / 1000;
     this.render();
   }
 
   render() {
+    const useShaders = this.options.shaders && this.pipeline && this.world;
+    worldUniforms.shaderOn.value = useShaders ? 1 : 0;
+    this.renderer.setRenderTarget(null);
     this.renderer.clear();
-    this.renderer.render(this.scene, this.camera);
+    if (useShaders) {
+      const center = this.player ? this.player.pos.clone() : this.camera.position.clone();
+      center.set(Math.floor(center.x), Math.floor(center.y), Math.floor(center.z));
+      if (this.dim === 'overworld') {
+        this.shadowFrame = (this.shadowFrame ?? 0) + 1;
+        if (this.shadowFrame % (this.touch ? 3 : 1) === 0) this.pipeline.renderShadows(this.scene, this.world.group, center, worldUniforms.sunDir.value);
+      }
+      const sunPos = this.camera.position.clone().addScaledVector(worldUniforms.sunDir.value, 300);
+      const sunVisible = this.dim === 'overworld' && Math.sin((this.time % 24000) / 24000 * Math.PI * 2) > -0.02;
+      this.pipeline.renderScene(this.scene, this.camera, sunPos, sunVisible && this.weather.rain < 0.5, !!this.player?.headInWater);
+      this.renderer.setRenderTarget(null);
+    } else this.renderer.render(this.scene, this.camera);
     if (this.player && this.hand.visible) {
       this.renderer.clearDepth();
       this.handCamera.fov = 70;
@@ -1412,7 +1623,7 @@ function drawLogo(c) {
 
 // ---------------------------------------------------------------- storage helpers
 function loadOptions() {
-  const def = { fov: 70, renderDistance: IS_TOUCH ? 4 : 6, sensitivity: 100, volume: 60, guiScale: IS_TOUCH ? (Math.min(innerWidth, innerHeight) < 500 ? 1.5 : 2) : 2, difficulty: 'normal', bobbing: true, clouds: !IS_TOUCH };
+  const def = { fov: 70, renderDistance: IS_TOUCH ? 4 : 6, sensitivity: 100, volume: 60, guiScale: IS_TOUCH ? (Math.min(innerWidth, innerHeight) < 500 ? 1.5 : 2) : 2, difficulty: 'normal', bobbing: true, clouds: !IS_TOUCH, shaders: false, fancy: !IS_TOUCH };
   try { return { ...def, ...JSON.parse(localStorage.getItem('mc_options') || '{}') }; } catch { return def; }
 }
 function listWorlds() { try { return JSON.parse(localStorage.getItem('mc_worlds') || '[]').sort((a, b) => b.lastPlayed - a.lastPlayed); } catch { return []; } }

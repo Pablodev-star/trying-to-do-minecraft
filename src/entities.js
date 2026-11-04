@@ -384,7 +384,7 @@ export class Mob extends Entity {
     if (this.type === 'sheep' && !this.sheared) this.game.spawnItem(this.pos.x, this.pos.y + 0.5, this.pos.z, { id: I[this.woolColor + '_wool'], count: 1 });
     for (const [name, chance] of this.info.rare ?? []) if (Math.random() < chance) this.game.spawnItem(this.pos.x, this.pos.y + 0.5, this.pos.z, { id: I[name], count: 1 });
     if (this.type === 'slime' && this.size > 1) for (let i = 0; i < 2 + ((Math.random() * 2) | 0); i++) this.game.spawnMob('slime', this.pos.x + (Math.random() - 0.5), this.pos.y + 0.5, this.pos.z + (Math.random() - 0.5), { size: this.size / 2 });
-    if (this.lastAttackedByPlayer || source === this.game.player) this.game.player.addXP(this.info.xp);
+    if (this.lastAttackedByPlayer || source === this.game.player) this.game.spawnXP(this.pos.x, this.pos.y + 0.5, this.pos.z, this.info.xp);
     if (this.type === 'ender_dragon') this.game.onDragonDeath(this);
   }
   teleport() {
@@ -418,7 +418,7 @@ export class Mob extends Entity {
     // environment damage
     if (this.inLava && !this.info.fireImmune) { this.fire = 8; this.hurt(4, null); }
     if (this.fire > 0) { this.fire -= dt; if (!this.info.fireImmune && Math.random() < dt) this.hurt(1, null); if (this.inWater) this.fire = 0; }
-    if (this.info.burns && this.game.world.hasSky && this.game.daylightLevel > 0.6 && !this.inWater && !this.baby) {
+    if (this.info.burns && this.game.world.hasSky && this.game.daylightLevel > 0.5 && !this.inWater && !this.baby && !(this.game.weather?.rain > 0.3)) {
       const l = this.world.getLight(Math.floor(this.pos.x), Math.floor(this.pos.y + 1.6), Math.floor(this.pos.z));
       if ((l >> 4) >= 15) this.fire = Math.max(this.fire, 3);
     }
@@ -696,6 +696,37 @@ export class Mob extends Entity {
       for (const m of mats) m.color.setRGB(c.r * r, c.g * g, c.b * b);
     }
     this.model.rotation.y = this.yaw;
+  }
+}
+
+// Experience orb: drifts toward the player and is absorbed on contact.
+export class XPOrb extends Entity {
+  constructor(game, x, y, z, value) {
+    super(game, x, y, z);
+    this.value = value;
+    this.w = this.h = 0.25;
+    this.stepHeight = 0;
+    const s = 0.12 + Math.min(0.18, Math.log2(value + 1) * 0.04);
+    this.inner = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), new THREE.MeshBasicMaterial({ color: 0xb8ff40 }));
+    this.mesh.add(this.inner);
+    this.vel.set((Math.random() - 0.5) * 3, 3 + Math.random() * 2, (Math.random() - 0.5) * 3);
+  }
+  update(dt) {
+    super.update(dt);
+    const p = this.game.player;
+    if (this.age > 300) { this.remove = true; return; }
+    const to = p.pos.clone().add(new THREE.Vector3(0, 0.8, 0)).sub(this.pos);
+    const d = to.length();
+    if (!p.dead && p.mode !== 'spectator' && d < 8 && this.age > 0.4) {
+      this.vel.addScaledVector(to.normalize(), dt * 40 * (1 - d / 8) + dt * 6);
+      this.vel.multiplyScalar(0.9);
+      this.pos.addScaledVector(this.vel, dt);
+      if (d < 0.7) { this.remove = true; if (p.mode === 'survival') p.addXP(this.value); this.game.sfx('xp'); }
+    } else this.physics(dt, 16, 0.9);
+    const k = 0.75 + Math.sin(this.age * 6) * 0.25;
+    this.inner.material.color.setRGB(0.6 + 0.4 * k, 1, 0.25 * k);
+    this.inner.rotation.y += dt * 3;
+    this.inner.position.y = 0.15 + Math.sin(this.age * 4) * 0.05;
   }
 }
 

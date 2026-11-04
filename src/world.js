@@ -4,6 +4,8 @@ import { BLOCKS, B } from './registry.js';
 import { Generator, CS, CH, SEA, idx, biomeColors } from './worldgen.js';
 import { atlasCanvas, tileUV, hex } from './textures.js';
 import { mulberry32 } from './noise.js';
+import { shapeBoxes, rotateBox, blockBoxesAt } from './shapes.js';
+import { chunkShaders } from './shaders.js';
 
 export { CS, CH, SEA };
 const PW = CS + 2; // padded width
@@ -24,37 +26,20 @@ export const worldUniforms = {
   fogNear: { value: 40 },
   fogFar: { value: 90 },
   time: { value: 0 },
+  shaderOn: { value: 0 },
+  shadowMap: { value: null },
+  shadowMatrix: { value: new THREE.Matrix4() },
+  shadowStrength: { value: 1 },
+  sunDir: { value: new THREE.Vector3(0.3, 1, 0.2).normalize() },
+  sunColor: { value: new THREE.Color(1, 0.95, 0.85) },
+  skyColor: { value: new THREE.Color(0x78a7ff) },
+  cameraPos: { value: new THREE.Vector3() },
+  rain: { value: 0 },
+  hasSky: { value: 1 },
 };
-const vert = `
-attribute vec2 light;
-attribute vec3 color;
-varying vec2 vUv; varying vec2 vLight; varying vec3 vColor; varying float vDist;
-void main(){
-  vUv = uv; vLight = light; vColor = color;
-  vec4 mv = modelViewMatrix * vec4(position,1.0);
-  vDist = length(mv.xyz);
-  gl_Position = projectionMatrix * mv;
-}`;
-const frag = (alphaTest) => `
-uniform sampler2D map; uniform float daylight; uniform float ambient;
-uniform vec3 fogColor; uniform float fogNear; uniform float fogFar;
-varying vec2 vUv; varying vec2 vLight; varying vec3 vColor; varying float vDist;
-void main(){
-  vec4 t = texture2D(map, vUv);
-  if (t.a < ${alphaTest.toFixed(2)}) discard;
-  float s = vLight.x * daylight;
-  float b = vLight.y;
-  float sb = pow(max(s, ambient), 1.5);
-  float bb = pow(b, 1.5);
-  vec3 l = max(vec3(sb), vec3(1.0, 0.9, 0.75) * bb);
-  l = max(l, vec3(0.035));
-  vec3 c = t.rgb * vColor * l;
-  float f = clamp((vDist - fogNear) / (fogFar - fogNear), 0.0, 1.0);
-  gl_FragColor = vec4(mix(c, fogColor, f), t.a);
-  #include <colorspace_fragment>
-}`;
-export const opaqueMaterial = new THREE.ShaderMaterial({ uniforms: worldUniforms, vertexShader: vert, fragmentShader: frag(0.5) });
-export const translucentMaterial = new THREE.ShaderMaterial({ uniforms: worldUniforms, vertexShader: vert, fragmentShader: frag(0.01), transparent: true, depthWrite: false, side: THREE.DoubleSide });
+const opq = chunkShaders(0.5, false), trn = chunkShaders(0.01, true);
+export const opaqueMaterial = new THREE.ShaderMaterial({ uniforms: worldUniforms, vertexShader: opq.vert, fragmentShader: opq.frag });
+export const translucentMaterial = new THREE.ShaderMaterial({ uniforms: worldUniforms, vertexShader: trn.vert, fragmentShader: trn.frag, transparent: true, depthWrite: false, side: THREE.DoubleSide });
 
 // ---------------------------------------------------------------- block flags tables (fast lookup)
 const OPAQUE = new Uint8Array(256), SOLID = new Uint8Array(256), EMIT = new Uint8Array(256), ATTEN = new Uint8Array(256);
@@ -119,6 +104,7 @@ export class World {
     this.rng = mulberry32(seed ^ 0xabcdef);
     this.hasSky = dim === 'overworld';
     this.listeners = [];
+    this.spawners = new Set();
   }
   key(cx, cz) { return cx + ',' + cz; }
   getChunk(cx, cz) { return this.chunks.get(cx + ',' + cz); }
@@ -128,12 +114,13 @@ export class World {
     let c = this.chunks.get(k);
     if (c) return c;
     const g = this.gen.generate(cx, cz);
-    let meta = null;
+    let meta = g.meta ?? null;
     const sv = this.saved[k];
     if (sv) { g.data.set(rleDecode(sv.d, g.data.length)); meta = rleDecode(sv.m, g.data.length); }
     c = new Chunk(cx, cz, g.data, g.biomes, meta);
     if (sv) c.modified = true;
     this.chunks.set(k, c);
+    for (let i = 0; i < g.data.length; i++) if (g.data[i] === B.spawner) this.spawners.add(`${(i & 15) + cx * CS},${i >> 8},${((i >> 4) & 15) + cz * CS}`);
     // neighbours need relight/remesh for borders
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const n = this.getChunk(cx + dx, cz + dz);
@@ -223,9 +210,25 @@ export class World {
       if ((b.render === 'cross' || id === B.torch || id === B.soul_torch || id === B.snow || id === B.ladder) && id !== B.cobweb && id !== B.fire) {
         const below = this.getBlock(nx, ny - 1, nz);
         let ok = SOLID[below] || below === B.farmland || below === B.farmland_wet;
+        if ((id === B.torch || id === B.soul_torch) && this.getMeta(nx, ny, nz)) {
+          const m = this.getMeta(nx, ny, nz);
+          const [ax, az] = [[0, 1], [-1, 0], [0, -1], [1, 0]][m - 1];
+          ok = SOLID[this.getBlock(nx + ax, ny, nz + az)];
+        }
         if (id === B.sugar_cane) ok = below === B.sugar_cane || below === B.grass_block || below === B.dirt || below === B.sand;
         if (id === B.ladder) ok = true;
         if (!ok) { this.setBlock(nx, ny, nz, 0, 0, { noUpdate: true }); this.game?.dropBlockItems(nx, ny, nz, id); }
+      }
+      if (b.shape === 'door' || b.shape === 'bed') {
+        const m = this.getMeta(nx, ny, nz);
+        let ox = 0, oy = 0, oz = 0;
+        if (b.shape === 'door') oy = m & 4 ? -1 : 1;
+        else { const d = [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0]][m & 3]; const s = m & 4 ? -1 : 1; ox = d[0] * s; oz = d[2] * s; }
+        if (this.getBlock(nx + ox, ny + oy, nz + oz) !== id) {
+          this.setBlock(nx, ny, nz, 0, 0, { noUpdate: true });
+          this.neighborUpdate(nx, ny, nz);
+          continue;
+        }
       }
       if (id === B.cactus) {
         const below = this.getBlock(nx, ny - 1, nz);
@@ -510,10 +513,10 @@ export class World {
           const nx = x + F.n[0], ny = y + F.n[1], nz = z + F.n[2];
           const nid = getP(nx, ny, nz);
           if (OPAQUE[nid]) continue;
-          if (nid === id && !b.opaque) continue; // glass/leaves/ice culling
+          if (nid === id && !b.opaque && !(this.game?.options?.fancy && b.tint?.startsWith('foliage'))) continue; // glass/ice (and leaves on "fast" graphics)
           const tex = texFor(b, f, meta);
           const tint = b.tint && (b.tint !== 'grass_top' || F.side === 'top') ? tintFor(b.tint, x, z) : null;
-          emitFace(buf, F, x, y, z, tex, tint, getP, getL, [0, 0, 0, 1, 1, 1]);
+          emitFace(buf, F, x, y, z, tex, tint, getP, getL, [0, 0, 0, 1, 1, 1], false, false, b.tint?.startsWith('foliage') ? 1 : 0);
         }
       } else if (b.render === 'liquid') {
         const above = getP(x, y + 1, z);
@@ -525,25 +528,31 @@ export class World {
           if (nid === id) continue;
           if (OPAQUE[nid] && f !== 2) continue;
           if (f === 2 && OPAQUE[nid]) continue;
-          emitFace(buf, F, x, y, z, b.tex, tint, getP, getL, [0, 0, 0, 1, h, 1], true);
+          emitFace(buf, F, x, y, z, b.tex, tint, getP, getL, [0, 0, 0, 1, h, 1], true, false, b.anim === 1 ? 3 : 4);
         }
       } else if (b.render === 'cross') {
         const tex = id >= B.wheat_0 && id <= B.potatoes_7 ? b.name : b.tex;
         const tint = b.tint ? tintFor(b.tint, x, z) : null;
-        emitCross(buf, x, y, z, tex, tint, getL(x, y, z));
+        emitCross(buf, x, y, z, tex, tint, getL(x, y, z), id === B.fire || id === B.cobweb ? 0 : 2);
       } else if (b.render === 'box' || b.render === 'portal') {
-        let box = b.box ? b.box.map((v) => v / 16) : (meta & 1 ? [0.375, 0, 0, 0.625, 1, 1] : [0, 0, 0.375, 1, 1, 0.625]);
-        if (b.orient && b.box) box = rotateBox(box, meta & 3);
+        let boxes;
+        if (b.render === 'portal') boxes = [meta & 1 ? [0.375, 0, 0, 0.625, 1, 1] : [0, 0, 0.375, 1, 1, 0.625]];
+        else {
+          boxes = shapeBoxes(b, meta, (dx, dy, dz) => getP(x + dx, y + dy, z + dz));
+          if (b.orient && b.box && !b.shape) boxes = boxes.map((bx) => rotateBox(bx, meta & 3));
+        }
         const tint = b.tint ? tintFor(b.tint, x, z) : null;
-        for (let f = 0; f < 6; f++) {
+        for (const box of boxes) for (let f = 0; f < 6; f++) {
           const F = FACES[f];
           const atEdge = (F.n[0] === 1 && box[3] === 1) || (F.n[0] === -1 && box[0] === 0) || (F.n[1] === 1 && box[4] === 1) || (F.n[1] === -1 && box[1] === 0) || (F.n[2] === 1 && box[5] === 1) || (F.n[2] === -1 && box[2] === 0);
           if (atEdge) {
             const nid = getP(x + F.n[0], y + F.n[1], z + F.n[2]);
-            if (OPAQUE[nid] || (nid === id && b.render === 'portal')) continue;
+            if (OPAQUE[nid] || (nid === id && (b.render === 'portal' || b.shape === 'pane'))) continue;
           }
-          const tex = texFor(b, f, meta);
-          emitFace(buf, F, x, y, z, tex, tint, getP, getL, box, true, b.render === 'portal');
+          let tex = texFor(b, f, meta);
+          if (b.shape === 'door') tex = meta & 4 ? 'door_top' : 'door_bottom';
+          if (b.shape === 'bed' && F.side === 'top') tex = meta & 4 ? 'bed_top' : 'bed_foot';
+          emitFace(buf, F, x, y, z, tex, tint, getP, getL, box, !!b.shape && b.shape !== 'slab' && b.shape !== 'stairs' ? true : b.shape ? false : true, b.render === 'portal', b.render === 'portal' ? 5 : 0);
         }
       }
     }
@@ -557,6 +566,8 @@ export class World {
       g.setAttribute('uv', new THREE.Float32BufferAttribute(buf.uv, 2));
       g.setAttribute('light', new THREE.Float32BufferAttribute(buf.light, 2));
       g.setAttribute('color', new THREE.Float32BufferAttribute(buf.col, 3));
+      g.setAttribute('normal', new THREE.Float32BufferAttribute(buf.nrm, 3));
+      g.setAttribute('mat', new THREE.Float32BufferAttribute(buf.mat, 1));
       g.setIndex(buf.ind);
       g.computeBoundingSphere();
       const mesh = new THREE.Mesh(g, k === 'opaque' ? opaqueMaterial : translucentMaterial);
@@ -606,11 +617,13 @@ export class World {
         const isFluid = b.render === 'liquid';
         if ((!isFluid || fluids) && b.render !== 'none') {
           // box-shaped blocks: test the actual box
-          if (b.box && b.render !== 'cross') {
-            let box = b.box.map((v) => v / 16);
-            if (b.orient) box = rotateBox(box, this.getMeta(x, y, z) & 3);
-            const hit = rayBox(origin, dir, [x + box[0], y + box[1], z + box[2], x + box[3], y + box[4], z + box[5]]);
-            if (hit && hit.t <= maxDist) return { x, y, z, id, face: hit.n, dist: hit.t };
+          if ((b.box || b.shape) && b.render !== 'cross') {
+            let best = null;
+            for (const bx of blockBoxesAt(this, b, x, y, z)) {
+              const hit = rayBox(origin, dir, bx);
+              if (hit && hit.t <= maxDist && (!best || hit.t < best.t)) best = hit;
+            }
+            if (best) return { x, y, z, id, face: best.n, dist: best.t };
           } else return { x, y, z, id, face, dist: t };
         }
       }
@@ -634,19 +647,10 @@ export class World {
 }
 
 // ---------------------------------------------------------------- mesh helpers
-function newBuf() { return { pos: [], uv: [], light: [], col: [], ind: [], n: 0 }; }
+function newBuf() { return { pos: [], uv: [], light: [], col: [], nrm: [], mat: [], ind: [], n: 0 }; }
 function hexRGB(c) { const h = hex(c); return [h[0] / 255, h[1] / 255, h[2] / 255]; }
 
-export function rotateBox(b, r) {
-  // rotate around block center in XZ; r: 0 south (no rotation)
-  let [x0, y0, z0, x1, y1, z1] = b;
-  for (let i = 0; i < r; i++) {
-    // rotate 90deg: (x,z) -> (z, 1-x)
-    const nx0 = z0, nx1 = z1, nz0 = 1 - x1, nz1 = 1 - x0;
-    x0 = nx0; x1 = nx1; z0 = nz0; z1 = nz1;
-  }
-  return [Math.min(x0, x1), y0, Math.min(z0, z1), Math.max(x0, x1), y1, Math.max(z0, z1)];
-}
+export { rotateBox };
 
 function rayBox(o, d, bx) {
   let tmin = -Infinity, tmax = Infinity, n = [0, 0, 0];
@@ -666,7 +670,7 @@ function rayBox(o, d, bx) {
   return { t: Math.max(0, tmin), n };
 }
 
-function emitFace(buf, F, x, y, z, tex, tint, getP, getL, box, noAO = false, flat = false) {
+function emitFace(buf, F, x, y, z, tex, tint, getP, getL, box, noAO = false, flat = false, mat = 0) {
   const [u0, v0, us] = tileUV(tex);
   const [x0, y0, z0, x1, y1, z1] = box;
   const n = F.n;
@@ -712,12 +716,13 @@ function emitFace(buf, F, x, y, z, tex, tint, getP, getL, box, noAO = false, fla
     buf.col.push(t[0] * shadeF, t[1] * shadeF, t[2] * shadeF);
   }
   buf.light.push(...lights);
+  for (let k = 0; k < 4; k++) { buf.nrm.push(n[0], n[1], n[2]); buf.mat.push(mat); }
   // flip quad diagonal for nicer AO interpolation
   if (ao[0] + ao[2] < ao[1] + ao[3]) buf.ind.push(base + 1, base + 2, base + 3, base + 1, base + 3, base);
   else buf.ind.push(base, base + 1, base + 2, base, base + 2, base + 3);
 }
 
-function emitCross(buf, x, y, z, tex, tint, l) {
+function emitCross(buf, x, y, z, tex, tint, l, mat = 2) {
   const [u0, v0, us] = tileUV(tex);
   const t = tint ?? [1, 1, 1];
   const quads = [
@@ -733,6 +738,8 @@ function emitCross(buf, x, y, z, tex, tint, l) {
       buf.uv.push(u0 + (0.001 + uvs[k][0] * 0.998) * us, v0 + (0.001 + uvs[k][1] * 0.998) * us);
       buf.light.push((l >> 4) / 15, (l & 15) / 15);
       buf.col.push(t[0] * 0.9, t[1] * 0.9, t[2] * 0.9);
+      buf.nrm.push(0, 1, 0);
+      buf.mat.push(mat * (uvs[k][1] === 0 ? 1 : 0.001)); // only the top vertices sway
     }
     if (flip) buf.ind.push(base, base + 2, base + 1, base, base + 3, base + 2);
     else buf.ind.push(base, base + 1, base + 2, base, base + 2, base + 3);

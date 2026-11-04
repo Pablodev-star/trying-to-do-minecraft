@@ -33,6 +33,9 @@ function block(name, display, p = {}) {
     sound: p.sound ?? 'stone',
     climbable: p.climbable ?? false,
     slow: p.slow ?? 0,
+    shape: p.shape ?? null,             // slab | stairs | fence | pane | torch | door | bed
+    base: p.base ?? null,               // full block a double slab turns into
+    anim: p.anim ?? 0,                  // animated texture: 1 water, 2 lava, 3 portal
   };
   BLOCKS.push(def); B[name] = id;
   if (!def.noItem) { ITEMS[id] = { id, name, display, stack: p.stack ?? 64, block: id, kind: 'block' }; I[name] = id; }
@@ -68,8 +71,8 @@ for (const [w, n] of [['oak', 'roble'], ['spruce', 'abeto'], ['birch', 'abedul']
   });
 }
 block('bedrock', 'Piedra base', { hardness: -1 });
-block('water', 'Agua', { render: 'liquid', pass: 'translucent', solid: false, opaque: false, hardness: -1, noItem: true, replaceable: true, tint: 'water' });
-block('lava', 'Lava', { render: 'liquid', solid: false, opaque: false, hardness: -1, noItem: true, replaceable: true, light: 15 });
+block('water', 'Agua', { anim: 1, render: 'liquid', pass: 'translucent', solid: false, opaque: false, hardness: -1, noItem: true, replaceable: true, tint: 'water' });
+block('lava', 'Lava', { anim: 2, render: 'liquid', solid: false, opaque: false, hardness: -1, noItem: true, replaceable: true, light: 15 });
 block('sand', 'Arena', { hardness: 0.5, tool: 'shovel', gravity: true, sound: 'sand' });
 block('red_sand', 'Arena roja', { hardness: 0.5, tool: 'shovel', gravity: true, sound: 'sand' });
 block('gravel', 'Grava', { hardness: 0.6, tool: 'shovel', gravity: true, sound: 'sand', drops: () => [[Math.random() < 0.1 ? 'flint' : 'gravel', 1]] });
@@ -106,8 +109,8 @@ block('tnt', 'Dinamita', { tex: T('tnt_top', 'tnt_side', 'tnt_bottom'), hardness
 block('bookshelf', 'Librería', { tex: T('oak_planks', 'bookshelf'), hardness: 1.5, tool: 'axe', drops: () => [['book', 3]], flammable: true, sound: 'wood' });
 block('obsidian', 'Obsidiana', { hardness: 50, ...pick, level: 3 });
 block('crying_obsidian', 'Obsidiana llorosa', { hardness: 50, ...pick, level: 3, light: 10 });
-block('torch', 'Antorcha', { render: 'box', box: [7, 0, 7, 9, 10, 9], solid: false, opaque: false, hardness: 0, light: 14, sound: 'wood' });
-block('soul_torch', 'Antorcha de almas', { render: 'box', box: [7, 0, 7, 9, 10, 9], solid: false, opaque: false, hardness: 0, light: 10, sound: 'wood' });
+block('torch', 'Antorcha', { render: 'box', shape: 'torch', solid: false, opaque: false, hardness: 0, light: 14, sound: 'wood' });
+block('soul_torch', 'Antorcha de almas', { render: 'box', shape: 'torch', solid: false, opaque: false, hardness: 0, light: 10, sound: 'wood' });
 block('crafting_table', 'Mesa de trabajo', { tex: T('crafting_table_top', 'crafting_table_side', 'oak_planks', 'crafting_table_front'), hardness: 2.5, tool: 'axe', orient: true, sound: 'wood' });
 block('furnace', 'Horno', { tex: T('furnace_top', 'furnace_side', 'furnace_top', 'furnace_front'), hardness: 3.5, ...pick, orient: true });
 block('lit_furnace', 'Horno encendido', { tex: T('furnace_top', 'furnace_side', 'furnace_top', 'furnace_front_on'), hardness: 3.5, ...pick, orient: true, light: 13, drops: 'furnace', noItem: true });
@@ -146,14 +149,14 @@ for (const [f, n] of [['dandelion', 'Diente de león'], ['poppy', 'Amapola'], ['
 for (const [w, n] of [['oak', 'roble'], ['spruce', 'abeto'], ['birch', 'abedul']]) block(`${w}_sapling`, `Brote de ${n}`, { render: 'cross', hardness: 0, sound: 'grass' });
 block('brown_mushroom', 'Champiñón marrón', { render: 'cross', hardness: 0, light: 1, sound: 'grass' });
 block('red_mushroom', 'Champiñón rojo', { render: 'cross', hardness: 0, sound: 'grass' });
-block('bed', 'Cama', { tex: T('bed_top', 'bed_side', 'oak_planks'), render: 'box', box: [0, 0, 0, 16, 9, 16], opaque: false, hardness: 0.2, orient: true, stack: 1, sound: 'wool' });
-block('oak_door', 'Puerta de roble', { tex: 'door_bottom', render: 'box', box: [0, 0, 13, 16, 16, 16], opaque: false, hardness: 3, tool: 'axe', orient: true, sound: 'wood' });
+block('bed', 'Cama', { tex: T('bed_top', 'bed_side', 'oak_planks'), render: 'box', shape: 'bed', opaque: false, hardness: 0.2, orient: true, stack: 1, sound: 'wool' });
+block('oak_door', 'Puerta de roble', { tex: 'door_bottom', render: 'box', shape: 'door', opaque: false, hardness: 3, tool: 'axe', orient: true, sound: 'wood' });
 // Nether
 block('netherrack', 'Netherrack', { hardness: 0.4, ...pick });
 block('soul_sand', 'Arena de almas', { hardness: 0.5, tool: 'shovel', slow: 0.5, sound: 'sand' });
 block('soul_soil', 'Tierra de almas', { hardness: 0.5, tool: 'shovel', sound: 'sand' });
 block('glowstone', 'Piedra luminosa', { hardness: 0.3, light: 15, drops: () => [['glowstone_dust', rnd(2, 4)]], sound: 'glass' });
-block('nether_portal', 'Portal del Nether', { render: 'portal', pass: 'translucent', solid: false, opaque: false, hardness: -1, light: 11, noItem: true, drops: null });
+block('nether_portal', 'Portal del Nether', { anim: 3, render: 'portal', pass: 'translucent', solid: false, opaque: false, hardness: -1, light: 11, noItem: true, drops: null });
 block('nether_quartz_ore', 'Mena de cuarzo del Nether', { hardness: 3, ...pick, drops: 'quartz' });
 block('nether_gold_ore', 'Mena de oro del Nether', { hardness: 3, ...pick, drops: () => [['gold_nugget', rnd(2, 6)]] });
 block('ancient_debris', 'Escombros ancestrales', { tex: T('ancient_debris_top', 'ancient_debris_side'), hardness: 30, ...pick, level: 3 });
@@ -173,6 +176,29 @@ block('end_portal_frame_eye', 'Marco con ojo', { tex: T('end_portal_frame_top_ey
 block('end_portal', 'Portal del End', { render: 'box', box: [0, 0, 0, 16, 12, 16], pass: 'opaque', solid: false, opaque: false, hardness: -1, light: 15, noItem: true, drops: null });
 block('purpur_block', 'Bloque de púrpur', { hardness: 1.5, ...pick });
 block('dragon_egg', 'Huevo de dragón', { render: 'box', box: [2, 0, 2, 14, 16, 14], opaque: false, hardness: 3, light: 1 });
+// Slabs, stairs, fences, panes
+const SLAB_MATS = [
+  ['oak', 'oak_planks', 'roble', 'wood'], ['spruce', 'spruce_planks', 'abeto', 'wood'], ['birch', 'birch_planks', 'abedul', 'wood'],
+  ['jungle', 'jungle_planks', 'jungla', 'wood'], ['acacia', 'acacia_planks', 'acacia', 'wood'], ['stone', 'stone', 'piedra', 'stone'],
+  ['cobblestone', 'cobblestone', 'roca', 'stone'], ['stone_brick', 'stone_bricks', 'ladrillos de piedra', 'stone'], ['brick', 'bricks', 'ladrillos', 'stone'],
+  ['sandstone', 'sandstone', 'arenisca', 'stone'], ['smooth_stone', 'smooth_stone', 'piedra lisa', 'stone'], ['quartz', 'quartz_block', 'cuarzo', 'stone'],
+  ['nether_brick', 'nether_bricks', 'ladrillos del Nether', 'stone'], ['purpur', 'purpur_block', 'púrpur', 'stone'],
+];
+export const SLAB_MATERIALS = SLAB_MATS;
+for (const [k, baseName, n, snd] of SLAB_MATS) {
+  const bb = BLOCKS[B[baseName]];
+  const common = { tex: bb.tex, hardness: bb.hardness, tool: bb.tool, needsTool: bb.needsTool, level: bb.level, sound: snd, render: 'box', opaque: false, pass: 'opaque', flammable: bb.flammable };
+  block(`${k}_slab`, `Losa de ${n}`, { ...common, shape: 'slab', base: baseName });
+  if (k !== 'smooth_stone') block(`${k}_stairs`, `Escaleras de ${n}`, { ...common, shape: 'stairs', orient: true });
+}
+block('oak_fence', 'Valla de roble', { tex: 'oak_planks', render: 'box', shape: 'fence', opaque: false, pass: 'opaque', hardness: 2, tool: 'axe', flammable: true, sound: 'wood' });
+block('spruce_fence', 'Valla de abeto', { tex: 'spruce_planks', render: 'box', shape: 'fence', opaque: false, pass: 'opaque', hardness: 2, tool: 'axe', flammable: true, sound: 'wood' });
+block('nether_brick_fence', 'Valla de ladrillos del Nether', { tex: 'nether_bricks', render: 'box', shape: 'fence', opaque: false, pass: 'opaque', hardness: 2, tool: 'pickaxe', needsTool: true, sound: 'stone' });
+block('glass_pane', 'Panel de cristal', { tex: 'glass', render: 'box', shape: 'pane', opaque: false, pass: 'cutout', hardness: 0.3, drops: null, sound: 'glass' });
+block('iron_bars', 'Barrotes de hierro', { tex: 'iron_bars', render: 'box', shape: 'pane', opaque: false, pass: 'cutout', hardness: 5, tool: 'pickaxe', needsTool: true });
+block('lantern', 'Farol', { tex: T('lantern_top', 'lantern'), render: 'box', box: [5, 0, 5, 11, 9, 11], opaque: false, hardness: 3.5, tool: 'pickaxe', light: 15, sound: 'stone' });
+block('spawner', 'Generador de monstruos', { render: 'cube', pass: 'cutout', opaque: false, hardness: 5, tool: 'pickaxe', needsTool: true, drops: null, light: 0 });
+block('path', 'Camino de tierra', { tex: T('path_top', 'path_side', 'dirt'), render: 'box', box: [0, 0, 0, 16, 15, 16], pass: 'opaque', opaque: false, hardness: 0.65, tool: 'shovel', drops: 'dirt', sound: 'grass' });
 block('fire', 'Fuego', { render: 'cross', solid: false, opaque: false, hardness: 0, noItem: true, drops: null, light: 15, replaceable: true });
 
 
@@ -326,6 +352,16 @@ shaped('end_stone_bricks', 4, ['##', '##'], { '#': 'end_stone' });
 shaped('white_wool', 1, ['##', '##'], { '#': 'string' });
 shaped('bed', 1, ['www', '###'], { w: '#wool', '#': '#planks' });
 shaped('oak_door', 3, ['##', '##', '##'], { '#': '#planks' });
+for (const [k, baseName] of SLAB_MATS) {
+  shaped(`${k}_slab`, 6, ['###'], { '#': baseName });
+  if (k !== 'smooth_stone') shaped(`${k}_stairs`, 4, ['#  ', '## ', '###'], { '#': baseName });
+}
+shaped('oak_fence', 3, ['#s#', '#s#'], { '#': 'oak_planks', s: 'stick' });
+shaped('spruce_fence', 3, ['#s#', '#s#'], { '#': 'spruce_planks', s: 'stick' });
+shaped('nether_brick_fence', 6, ['###', '###'], { '#': 'nether_bricks' });
+shaped('glass_pane', 16, ['###', '###'], { '#': 'glass' });
+shaped('iron_bars', 16, ['###', '###'], { '#': 'iron_ingot' });
+shaped('lantern', 1, ['nnn', 'ntn', 'nnn'], { n: 'iron_nugget', t: 'torch' });
 shaped('ladder', 3, ['s s', 'sss', 's s'], { s: 'stick' });
 shapeless('jack_o_lantern', 1, ['pumpkin', 'torch']);
 shapeless('bone_meal', 3, ['bone']);

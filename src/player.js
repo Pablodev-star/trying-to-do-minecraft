@@ -4,6 +4,7 @@ import { BLOCKS, B, ITEMS, I, maxStack } from './registry.js';
 import { moveEntity, aabbIntersectsBlocks, rayAABB } from './physics.js';
 import { Mob, Projectile, PrimedTNT, EndCrystal } from './entities.js';
 import { SOLID, rotateBox } from './world.js';
+import { shapeBoxes } from './shapes.js';
 
 const GRAV = 32;
 
@@ -431,7 +432,17 @@ export class Player {
       if (id === B.furnace || id === B.lit_furnace) { g.ui.open('furnace', g.getTile(hit.x, hit.y, hit.z, 'furnace'), k); return; }
       if (id === B.chest) { g.ui.open('chest', g.getTile(hit.x, hit.y, hit.z, 'chest'), k); return; }
       if (id === B.bed) { g.sleep(hit); return; }
-      if (id === B.oak_door) { w.setBlock(hit.x, hit.y, hit.z, B.oak_door, (w.getMeta(hit.x, hit.y, hit.z) + 1) & 3); g.sfx('door'); return; }
+      if (id === B.oak_door) {
+        const m = w.getMeta(hit.x, hit.y, hit.z);
+        const by = m & 4 ? hit.y - 1 : hit.y;
+        const bm = w.getMeta(hit.x, by, hit.z);
+        // open = rotate the slab a quarter turn; bit 3 remembers the state
+        const open = !(bm & 8);
+        const nm = ((open ? (bm + 1) : (bm + 3)) & 3) | (open ? 8 : 0);
+        w.setBlock(hit.x, by, hit.z, B.oak_door, nm, { noUpdate: true });
+        if (w.getBlock(hit.x, by + 1, hit.z) === B.oak_door) w.setBlock(hit.x, by + 1, hit.z, B.oak_door, nm | 4, { noUpdate: true });
+        g.sfx('door'); return;
+      }
       if (id === B.tnt && (it?.name === 'flint_and_steel')) { w.setBlock(hit.x, hit.y, hit.z, 0); g.addEntity(new PrimedTNT(g, hit.x, hit.y, hit.z)); this.damageHeld(); return; }
       if (id === B.end_portal_frame && it?.name === 'ender_eye') {
         w.setBlock(hit.x, hit.y, hit.z, B.end_portal_frame_eye, w.getMeta(hit.x, hit.y, hit.z));
@@ -549,11 +560,26 @@ export class Player {
 
   placeBlock(hit, id) {
     const w = this.world, g = this.game;
+    const b = BLOCKS[id];
+    const eye = this.eyePos(), dir = this.lookDir();
+    const hitPoint = eye.clone().addScaledVector(dir, hit.dist ?? 0);
+    const fracY = hitPoint.y - Math.floor(hitPoint.y);
+    // slab on matching slab -> double slab (full base block)
+    if (b.shape === 'slab' && hit.id === id) {
+      const m = w.getMeta(hit.x, hit.y, hit.z);
+      if ((hit.face[1] === 1 && !(m & 1)) || (hit.face[1] === -1 && (m & 1))) {
+        if (this.blocked([[hit.x, hit.y, hit.z, [[0, 0, 0, 1, 1, 1]]]])) return;
+        w.setBlock(hit.x, hit.y, hit.z, B[b.base]); this.consumeHeld(); this.swing = 1; g.sfx('place:' + b.sound); return;
+      }
+    }
     const tgt = this.placeTarget(hit);
     if (!tgt) return;
     const { x, y, z } = tgt;
     if (y < 0 || y >= 128) return;
-    const b = BLOCKS[id];
+    if (b.shape === 'slab' && w.getBlock(x, y, z) === id) {
+      if (this.blocked([[x, y, z, [[0, 0, 0, 1, 1, 1]]]])) return;
+      w.setBlock(x, y, z, B[b.base]); this.consumeHeld(); this.swing = 1; g.sfx('place:' + b.sound); return;
+    }
     // support rules
     const below = w.getBlock(x, y - 1, z);
     if (b.render === 'cross' && id !== B.cobweb) {
@@ -561,31 +587,68 @@ export class Player {
         : (below === B.grass_block || below === B.dirt || below === B.podzol || below === B.farmland || below === B.farmland_wet || ((id === B.brown_mushroom || id === B.red_mushroom) && SOLID[below]) || (id === B.dead_bush && (below === B.sand || below === B.red_sand)));
       if (!ok) return;
     }
-    if ((id === B.torch || id === B.soul_torch) && !SOLID[below]) return;
     if (id === B.cactus && below !== B.sand && below !== B.cactus && below !== B.red_sand) return;
-    // collision with entities
-    if (b.solid) {
-      let box = b.box ? b.box.map((v) => v / 16) : [0, 0, 0, 1, 1, 1];
-      const meta0 = this.facingMeta();
-      if (b.orient && b.box) box = rotateBox(box, meta0);
-      const bx = [x + box[0], y + box[1], z + box[2], x + box[3], y + box[4], z + box[5]];
-      const overlaps = (e) => {
-        const hw = e.w / 2;
-        return e.pos.x + hw > bx[0] && e.pos.x - hw < bx[3] && e.pos.y + e.h > bx[1] && e.pos.y < bx[4] && e.pos.z + hw > bx[2] && e.pos.z - hw < bx[5];
-      };
-      if (this.mode !== 'spectator' && overlaps(this)) return;
-      for (const e of g.entities) if (e instanceof Mob && !e.dead && overlaps(e)) return;
-    }
+    // metadata
     let meta = 0;
+    const [fx, fy, fz] = hit.face;
     if (b.orient) meta = this.facingMeta();
-    if (id === B.ladder) { const [fx, , fz] = hit.face; if (fx || fz) meta = fz === 1 ? 2 : fz === -1 ? 0 : fx === 1 ? 3 : 1; }
-    w.setBlock(x, y, z, id, meta);
-    if (id === B.bed) { /* single-block bed */ }
+    if (b.shape === 'slab') meta = fy === -1 || (fy === 0 && fracY > 0.5) ? 1 : 0;
+    if (b.shape === 'stairs') { meta = (meta + 2) & 3; if (fy === -1 || (fy === 0 && fracY > 0.5)) meta |= 4; }
+    if (b.shape === 'torch') {
+      if (fy === 1 || (!fx && !fz)) { if (!SOLID[below]) return; meta = 0; }
+      else {
+        meta = fz === 1 ? 3 : fz === -1 ? 1 : fx === 1 ? 2 : 4;
+        if (!SOLID[w.getBlock(x - fx, y, z - fz)]) return;
+      }
+    }
+    if (id === B.ladder) { if (fx || fz) meta = fz === 1 ? 2 : fz === -1 ? 0 : fx === 1 ? 3 : 1; }
+    // two-block structures
+    let extra = null;
+    if (b.shape === 'door') {
+      const up = w.getBlock(x, y + 1, z);
+      if ((up && !BLOCKS[up].replaceable) || !SOLID[below]) return;
+      meta = this.facingMeta();
+      extra = { x, y: y + 1, z, meta: meta | 4 };
+    }
+    if (b.shape === 'bed') {
+      const d = this.lookDir();
+      let hx = 0, hz = 0;
+      if (Math.abs(d.x) > Math.abs(d.z)) hx = Math.sign(d.x); else hz = Math.sign(d.z);
+      const hid = w.getBlock(x + hx, y, z + hz);
+      if ((hid && !BLOCKS[hid].replaceable) || !SOLID[below] || !SOLID[w.getBlock(x + hx, y - 1, z + hz)]) return;
+      meta = this.facingMeta();
+      extra = { x: x + hx, y, z: z + hz, meta: meta | 4 };
+    }
+    // collision with entities (both halves of doors and beds)
+    if (b.solid) {
+      const boxesFor = (bx, by, bz, m) => {
+        const get = (dx, dy, dz) => w.getBlock(bx + dx, by + dy, bz + dz);
+        let boxes = shapeBoxes(b, m, get);
+        if (b.orient && b.box && !b.shape) boxes = boxes.map((q) => rotateBox(q, m & 3));
+        return [bx, by, bz, boxes];
+      };
+      const parts = [boxesFor(x, y, z, meta)];
+      if (extra) parts.push(boxesFor(extra.x, extra.y, extra.z, extra.meta));
+      if (this.blocked(parts)) return;
+    }
+    w.setBlock(x, y, z, id, meta, extra ? { noUpdate: true } : {});
+    if (extra) { w.setBlock(extra.x, extra.y, extra.z, id, extra.meta, { noUpdate: true }); }
     this.consumeHeld();
     this.swing = 1;
+    g.stats.placed++;
     g.sfx('place:' + b.sound);
-    // checks: carved pumpkin golem? (iron golem: 4 iron blocks T + pumpkin)
     if (id === B.pumpkin || id === B.jack_o_lantern) g.checkGolem(x, y, z);
+  }
+
+  // true if the player (unless spectating) or a living mob overlaps any of the given boxes
+  // parts: [[x, y, z, boxes(local 0..1)], ...]
+  blocked(parts) {
+    const overlaps = (e) => {
+      const hw = e.w / 2;
+      return parts.some(([x, y, z, boxes]) => boxes.some((bb) => e.pos.x + hw > x + bb[0] && e.pos.x - hw < x + bb[3] && e.pos.y + e.h > y + bb[1] && e.pos.y < y + bb[4] && e.pos.z + hw > z + bb[2] && e.pos.z - hw < z + bb[5]));
+    };
+    if (this.mode !== 'spectator' && overlaps(this)) return true;
+    return this.game.entities.some((e) => e instanceof Mob && !e.dead && overlaps(e));
   }
 
   facingMeta() {
