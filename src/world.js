@@ -1,6 +1,6 @@
 // Chunk storage, lighting, meshing, fluids and random ticks.
 import * as THREE from '../lib/three.module.min.js';
-import { BLOCKS, B } from './registry.js';
+import { BLOCKS, B, BLOCK_LIMIT } from './registry.js';
 import { Generator, CS, CH, SEA, idx, biomeColors } from './worldgen.js';
 import { atlasCanvas, tileUV, hex } from './textures.js';
 import { mulberry32 } from './noise.js';
@@ -42,7 +42,7 @@ export const opaqueMaterial = new THREE.ShaderMaterial({ uniforms: worldUniforms
 export const translucentMaterial = new THREE.ShaderMaterial({ uniforms: worldUniforms, vertexShader: trn.vert, fragmentShader: trn.frag, transparent: true, depthWrite: false, side: THREE.DoubleSide });
 
 // ---------------------------------------------------------------- block flags tables (fast lookup)
-const OPAQUE = new Uint8Array(256), SOLID = new Uint8Array(256), EMIT = new Uint8Array(256), ATTEN = new Uint8Array(256);
+const OPAQUE = new Uint8Array(BLOCK_LIMIT), SOLID = new Uint8Array(BLOCK_LIMIT), EMIT = new Uint8Array(BLOCK_LIMIT), ATTEN = new Uint8Array(BLOCK_LIMIT);
 for (const b of BLOCKS) {
   OPAQUE[b.id] = b.opaque ? 1 : 0;
   SOLID[b.id] = b.solid ? 1 : 0;
@@ -116,7 +116,7 @@ export class World {
     const g = this.gen.generate(cx, cz);
     let meta = g.meta ?? null;
     const sv = this.saved[k];
-    if (sv) { g.data.set(rleDecode(sv.d, g.data.length)); meta = rleDecode(sv.m, g.data.length); }
+    if (sv) { g.data.set(rleDecode(sv.d, g.data.length)); meta = rleDecode(sv.m, g.data.length, Uint8Array); }
     c = new Chunk(cx, cz, g.data, g.biomes, meta);
     if (sv) c.modified = true;
     this.chunks.set(k, c);
@@ -472,7 +472,7 @@ export class World {
   // ---------------------------------------------------------------- meshing
   buildMesh(c) {
     // padded copies
-    const P = new Uint8Array(PW * PW * CH), PL = new Uint8Array(PW * PW * CH), PM = new Uint8Array(PW * PW * CH);
+    const P = new Uint16Array(PW * PW * CH), PL = new Uint8Array(PW * PW * CH), PM = new Uint8Array(PW * PW * CH);
     const pidx = (x, y, z) => (x + 1) + (z + 1) * PW + y * PW * PW;
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
       const n = (dx || dz) ? this.getChunk(c.cx + dx, c.cz + dz) : c;
@@ -747,24 +747,33 @@ function emitCross(buf, x, y, z, tex, tint, l, mat = 2) {
 }
 
 // ---------------------------------------------------------------- RLE (for saves)
+// Format "2:" = 16-bit values (block ids up to 1023). Older saves are 8-bit without prefix.
 export function rleEncode(arr) {
   const out = [];
   let i = 0;
   while (i < arr.length) {
     const v = arr[i]; let n = 1;
     while (i + n < arr.length && arr[i + n] === v && n < 65535) n++;
-    out.push(v, n & 255, n >> 8);
+    out.push(v & 255, v >> 8, n & 255, n >> 8);
     i += n;
   }
   let s = '';
   const u = new Uint8Array(out);
   for (let k = 0; k < u.length; k += 8192) s += String.fromCharCode.apply(null, u.subarray(k, k + 8192));
-  return btoa(s);
+  return '2:' + btoa(s);
 }
-export function rleDecode(str, len) {
-  const bin = atob(str);
-  const out = new Uint8Array(len);
+export function rleDecode(str, len, Arr = Uint16Array) {
+  const out = new Arr(len);
   let o = 0;
+  if (str.startsWith('2:')) {
+    const bin = atob(str.slice(2));
+    for (let i = 0; i < bin.length; i += 4) {
+      const v = bin.charCodeAt(i) | (bin.charCodeAt(i + 1) << 8), n = bin.charCodeAt(i + 2) | (bin.charCodeAt(i + 3) << 8);
+      out.fill(v, o, o + n); o += n;
+    }
+    return out;
+  }
+  const bin = atob(str);
   for (let i = 0; i < bin.length; i += 3) {
     const v = bin.charCodeAt(i), n = bin.charCodeAt(i + 1) | (bin.charCodeAt(i + 2) << 8);
     out.fill(v, o, o + n); o += n;

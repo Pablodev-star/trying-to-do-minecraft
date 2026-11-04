@@ -52,7 +52,7 @@ export function makeSpriteMesh(id, size = 1) {
   return new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat.clone());
 }
 export function makeItemMesh(id, size) {
-  if (id < 256 && BLOCKS[id] && BLOCKS[id].render !== 'cross' && !itemSpriteCanvas(ITEMS[id]?.name)) return makeBlockMesh(id, size * 0.55);
+  if (id < 1024 && BLOCKS[id] && BLOCKS[id].render !== 'cross' && !itemSpriteCanvas(ITEMS[id]?.name)) return makeBlockMesh(id, size * 0.55);
   return makeSpriteMesh(id, size);
 }
 

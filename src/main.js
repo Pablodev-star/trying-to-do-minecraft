@@ -265,7 +265,7 @@ class Game {
     this.meta = meta;
     this.seed = meta.seed;
     this.cheats = meta.cheats;
-    const save = fresh ? null : readWorld(meta.id);
+    const save = fresh ? null : migrateSave(readWorld(meta.id));
     this.dimData = save?.dims ?? {};
     this.time = save?.time ?? 1000;
     this.dragonKilled = save?.dragonKilled ?? false;
@@ -535,7 +535,7 @@ class Game {
       .map((e) => ({ type: e.type, x: e.pos.x, y: e.pos.y, z: e.pos.z, baby: e.baby, tamed: e.tamed, sheared: e.sheared, wool: e.woolColor, home: e.home }));
     const keptVillages = this.dim === 'overworld' ? [...new Set(mobs.map((m) => m.home).filter(Boolean))] : [...this.villagesSpawned];
     const data = {
-      version: 1, seed: this.seed, time: this.time, dims, villagesSpawned: keptVillages, weather: { target: this.weather.target, thunder: this.weather.thunder, timer: this.weather.timer }, dragonKilled: this.dragonKilled, keepInventory: this.keepInventory,
+      version: 2, seed: this.seed, time: this.time, dims, villagesSpawned: keptVillages, weather: { target: this.weather.target, thunder: this.weather.thunder, timer: this.weather.timer }, dragonKilled: this.dragonKilled, keepInventory: this.keepInventory,
       achievements: [...this.achievements], stats: this.stats, mobs: this.dim === 'overworld' ? mobs : [],
       player: { pos: [p.pos.x, p.pos.y, p.pos.z], yaw: p.yaw, pitch: p.pitch, health: p.health, food: p.food, saturation: p.saturation, xp: p.xp, level: p.level, inventory: p.inventory, armor: p.armor, selected: p.selected, mode: p.mode, dim: this.dim, spawnPoint: p.spawnPoint, flying: p.flying },
     };
@@ -1347,7 +1347,7 @@ class Game {
         this.hand.add(arm);
       } else {
         const m = makeItemMesh(id, 0.55);
-        const isBlock = id < 256 && BLOCKS[id]?.render !== 'cross' && m.geometry.type === 'BoxGeometry';
+        const isBlock = id < 1024 && BLOCKS[id]?.render !== 'cross' && m.geometry.type === 'BoxGeometry';
         if (isBlock) { m.position.set(0.5, -0.45, -0.75); m.rotation.set(0.1, 0.8, 0); }
         else { m.position.set(0.5, -0.32, -0.6); m.rotation.set(0, -1.4, 0.4); }
         this.hand.add(m);
@@ -1635,6 +1635,16 @@ function saveWorldMeta(meta) {
 function deleteWorld(id) {
   localStorage.setItem('mc_worlds', JSON.stringify(listWorlds().filter((w) => w.id !== id)));
   localStorage.removeItem('mc_world_' + id);
+}
+// Version 1 saves stored items from id 256; version 2 moves them to 1024 to make room for blocks.
+function migrateSave(save) {
+  if (!save || (save.version ?? 1) >= 2) return save;
+  const fix = (s) => { if (s && s.id >= 256) s.id += 1024 - 256; };
+  const p = save.player;
+  if (p) { (p.inventory ?? []).forEach(fix); (p.armor ?? []).forEach(fix); }
+  for (const d of Object.values(save.dims ?? {})) for (const t of Object.values(d.tiles ?? {})) (t.items ?? []).forEach(fix);
+  save.version = 2;
+  return save;
 }
 function readWorld(id) { try { return JSON.parse(localStorage.getItem('mc_world_' + id)); } catch { return null; } }
 

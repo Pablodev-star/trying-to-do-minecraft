@@ -78,7 +78,7 @@ export class Generator {
   }
 
   generate(cx, cz) {
-    const data = new Uint8Array(CS * CS * CH);
+    const data = new Uint16Array(CS * CS * CH);
     const biomes = new Uint8Array(CS * CS);
     if (this.dim === 'nether') this.genNether(cx, cz, data, biomes);
     else if (this.dim === 'end') this.genEnd(cx, cz, data, biomes);

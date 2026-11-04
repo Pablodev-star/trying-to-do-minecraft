@@ -3,7 +3,8 @@ import { WOOL_COLORS, SPAWN_EGG_COLORS } from './textures.js';
 
 export const BLOCKS = [];   // id -> block def
 export const B = {};        // name -> block id
-export const ITEMS = [];    // id -> item def (blocks occupy ids < 256)
+export const BLOCK_LIMIT = 1024; // block ids are 0..1023, item ids start at 1024
+export const ITEMS = [];    // id -> item def (blocks occupy ids < BLOCK_LIMIT)
 export const I = {};        // name -> item id
 
 const T = (top, side, bottom = top, front = side) => ({ top, side, bottom, front });
@@ -203,7 +204,7 @@ block('fire', 'Fuego', { render: 'cross', solid: false, opaque: false, hardness:
 
 
 // ---------------------------------------------------------------- items
-let nextItemId = 256;
+let nextItemId = BLOCK_LIMIT;
 function item(name, display, p = {}) {
   const id = nextItemId++;
   const def = { id, name, display, stack: p.stack ?? 64, kind: p.kind ?? 'item', ...p };
@@ -274,7 +275,7 @@ for (const m of Object.keys(SPAWN_EGG_COLORS)) item(`${m}_spawn_egg`, `Huevo gen
 
 // helpers
 export function itemDef(id) { return ITEMS[id]; }
-export function isBlockItem(id) { return id < 256 && !!BLOCKS[id]; }
+export function isBlockItem(id) { return id < BLOCK_LIMIT && !!BLOCKS[id]; }
 export function maxStack(id) { return ITEMS[id]?.stack ?? 64; }
 
 // ---------------------------------------------------------------- recipes

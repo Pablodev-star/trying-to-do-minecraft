@@ -30,7 +30,7 @@ export function iconFor(id) {
   g.imageSmoothingEnabled = false;
   const it = ITEMS[id];
   const sprite = it && itemSpriteCanvas(it.name);
-  const b = id < 256 ? BLOCKS[id] : null;
+  const b = id < 1024 ? BLOCKS[id] : null;
   if (sprite) g.drawImage(sprite, 0, 0, SIZE, SIZE);
   else if (b && b.shape === 'fence') {
     const tc = tileCanvas(b.tex);
