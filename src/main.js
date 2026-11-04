@@ -58,8 +58,20 @@ class Game {
     this.touchControls = IS_TOUCH ? new TouchControls(this) : null;
     // On hybrid devices (touchscreen laptop, tablet + keyboard) follow the input actually in use.
     if (this.touchControls) {
-      document.addEventListener('pointerdown', (e) => this.setTouchMode(e.pointerType === 'touch'), true);
-      document.addEventListener('keydown', (e) => { if (/^(Key[WASDE]|Space|Shift|Control|Digit)/.test(e.code) && document.activeElement?.tagName !== 'INPUT') this.setTouchMode(false); }, true);
+      // Touch -> touch mode. Only real mouse movement or real game keys switch to desktop mode,
+      // and never right after a touch (mobile browsers fire emulated mouse/key events).
+      const recentTouch = () => performance.now() - (this.lastTouchAt ?? -1e9) < 1500;
+      document.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch' || e.pointerType === 'pen') { this.lastTouchAt = performance.now(); this.setTouchMode(true); } }, true);
+      document.addEventListener('touchstart', () => { this.lastTouchAt = performance.now(); this.setTouchMode(true); }, { capture: true, passive: true });
+      document.addEventListener('pointermove', (e) => {
+        if (e.pointerType !== 'mouse' || recentTouch() || !(Math.abs(e.movementX) + Math.abs(e.movementY) > 0)) return;
+        this.mouseMoves = (this.mouseMoves ?? 0) + 1;
+        if (this.mouseMoves > 8) this.setTouchMode(false);
+      }, true);
+      document.addEventListener('keydown', (e) => {
+        if (e.isComposing || e.keyCode === 229 || recentTouch() || document.activeElement?.tagName === 'INPUT') return;
+        if (/^(Key[WASD]|Space)$/.test(e.code) && this.running) this.setTouchMode(false);
+      }, true);
     }
     this.bindInput();
     window.addEventListener('resize', () => this.resize());
@@ -803,6 +815,7 @@ class Game {
   }
   itemDef(id) { return ITEMS[id]; }
   setTouchMode(on) {
+    if (on) this.mouseMoves = 0;
     if (on === this.touch) return;
     this.touch = on;
     document.body.classList.toggle('touch', on);

@@ -1,8 +1,12 @@
 // Touch controls for phones and tablets: virtual joystick, look by dragging,
 // tap to use/place, hold to mine, and on-screen buttons.
 
-export const IS_TOUCH = /[?&]touch=1/.test(location.search) ||
-  (window.matchMedia?.('(pointer: coarse)').matches ?? false) || ('ontouchstart' in window && navigator.maxTouchPoints > 0);
+// Any sign of a touchscreen enables touch controls; on hybrid devices the game then
+// switches to keyboard/mouse as soon as those are actually used (see Game.setTouchMode).
+export const IS_TOUCH = /[?&]touch=1/.test(location.search) || (!/[?&]touch=0/.test(location.search) && (
+  (navigator.maxTouchPoints ?? 0) > 0 || 'ontouchstart' in window ||
+  (window.matchMedia?.('(pointer: coarse)').matches ?? false) || (window.matchMedia?.('(any-pointer: coarse)').matches ?? false) ||
+  /Android|iPhone|iPad|iPod|Mobile|Silk|Kindle/i.test(navigator.userAgent)));
 
 const HOLD_MS = 280;       // hold this long without moving => mine / continuous use
 const TAP_MOVE = 12;       // px of movement that turns a touch into a look-drag

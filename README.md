@@ -32,7 +32,7 @@ python3 -m http.server 8000
 
 ### Móvil y tablet
 
-Se detecta automáticamente en pantallas táctiles (o fuerzalo con `?touch=1` en la URL). Juega en horizontal; al entrar a un mundo intenta ponerse en pantalla completa.
+Se detecta automáticamente en pantallas táctiles. Si no aparecen los controles, abre la página con `?touch=1` al final de la URL para forzarlos (`?touch=0` los desactiva). Juega en horizontal; al entrar a un mundo intenta ponerse en pantalla completa.
 
 | Gesto / botón | Acción |
 |---|---|
