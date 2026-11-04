@@ -530,17 +530,18 @@ export class Player {
         if (chance) { this.consumeHeld(); if (Math.random() < chance) w.setBlock(hit.x, hit.y, hit.z, B.composter, Math.min(7, m + 1)); g.sfx('dig:grass'); g.particles?.burst(hit.x + 0.5, hit.y + 1, hit.z + 0.5, 0x8aa040); return; }
       }
       if (id === B.bed) { g.sleep(hit); return; }
-      if (id === B.oak_door) {
+      if (id === B.oak_door) { g.toggleDoor(hit.x, hit.y, hit.z); return; }
+      if (id === B.lever) { w.setBlock(hit.x, hit.y, hit.z, id, w.getMeta(hit.x, hit.y, hit.z) ^ 8); g.sfx('click'); return; }
+      if (id === B.stone_button || id === B.oak_button) {
         const m = w.getMeta(hit.x, hit.y, hit.z);
-        const by = m & 4 ? hit.y - 1 : hit.y;
-        const bm = w.getMeta(hit.x, by, hit.z);
-        // open = rotate the slab a quarter turn; bit 3 remembers the state
-        const open = !(bm & 8);
-        const nm = ((open ? (bm + 1) : (bm + 3)) & 3) | (open ? 8 : 0);
-        w.setBlock(hit.x, by, hit.z, B.oak_door, nm, { noUpdate: true });
-        if (w.getBlock(hit.x, by + 1, hit.z) === B.oak_door) w.setBlock(hit.x, by + 1, hit.z, B.oak_door, nm | 4, { noUpdate: true });
-        g.sfx('door'); return;
+        if (!(m & 8)) { w.setBlock(hit.x, hit.y, hit.z, id, m | 8); g.sfx('click'); g.redstone.schedule(id === B.stone_button ? 20 : 30, () => { if (w.getBlock(hit.x, hit.y, hit.z) === id) w.setBlock(hit.x, hit.y, hit.z, id, w.getMeta(hit.x, hit.y, hit.z) & 7); g.sfx('click'); }); }
+        return;
       }
+      if (id === B.repeater || id === B.powered_repeater) { const m = w.getMeta(hit.x, hit.y, hit.z); w.setBlock(hit.x, hit.y, hit.z, id, (m & 3) | ((((m >> 2) + 1) & 3) << 2)); g.sfx('click'); return; }
+      if (id === B.comparator) { w.setBlock(hit.x, hit.y, hit.z, id, w.getMeta(hit.x, hit.y, hit.z) ^ 4); g.sfx('click'); return; }
+      if (id === B.note_block) { const m = (w.getMeta(hit.x, hit.y, hit.z) + 1) % 25; w.setBlock(hit.x, hit.y, hit.z, id, m, { redstone: true }); g.playNote(hit.x, hit.y, hit.z, m); return; }
+      if (id === B.dispenser || id === B.dropper) { g.ui.open('container', { title: id === B.dispenser ? 'Dispensador' : 'Soltador', cols: 3, tile: g.getTile(hit.x, hit.y, hit.z, 'dispenser') }); return; }
+      if (id === B.hopper) { g.ui.open('container', { title: 'Tolva', cols: 5, tile: g.getTile(hit.x, hit.y, hit.z, 'hopper') }); return; }
       if (id === B.tnt && (it?.name === 'flint_and_steel')) { w.setBlock(hit.x, hit.y, hit.z, 0); g.addEntity(new PrimedTNT(g, hit.x, hit.y, hit.z)); this.damageHeld(); return; }
       if (id === B.end_portal_frame && it?.name === 'ender_eye') {
         w.setBlock(hit.x, hit.y, hit.z, B.end_portal_frame_eye, w.getMeta(hit.x, hit.y, hit.z));
@@ -663,6 +664,7 @@ export class Player {
       return;
     }
     // place block
+    if (it.name === 'redstone') { this.placeBlock(hit, B.redstone_wire); return; }
     if (it.block != null) this.placeBlock(hit, it.block);
   }
 
@@ -721,6 +723,18 @@ export class Player {
       }
     }
     if (id === B.ladder) { if (fx || fz) meta = fz === 1 ? 2 : fz === -1 ? 0 : fx === 1 ? 3 : 1; }
+    if (b.shape === 'lever' || b.shape === 'button') {
+      if (fy === 1) { if (!SOLID[below]) return; meta = 0; }
+      else if (fy === -1) { if (!SOLID[w.getBlock(x, y + 1, z)]) return; meta = 5; }
+      else { meta = fz === 1 ? 3 : fz === -1 ? 1 : fx === 1 ? 2 : 4; if (!SOLID[w.getBlock(x - fx, y, z - fz)]) return; }
+    }
+    if ((b.shape === 'plate' || id === B.redstone_wire || id === B.repeater || id === B.comparator) && !SOLID[below]) return;
+    if (b.facing6) {
+      const d = this.lookDir();
+      if (d.y > 0.75) meta = 0; else if (d.y < -0.75) meta = 1;
+      else if (Math.abs(d.x) > Math.abs(d.z)) meta = d.x > 0 ? 4 : 5; else meta = d.z > 0 ? 2 : 3;
+    }
+    if (id === B.hopper) meta = fy !== 0 ? 0 : fz === 1 ? 3 : fz === -1 ? 1 : fx === 1 ? 2 : 4;
     // two-block structures
     let extra = null;
     if (b.shape === 'door') {

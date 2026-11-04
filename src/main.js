@@ -14,6 +14,7 @@ import { blockBoxesAt } from './shapes.js';
 import { enchLevel, ENCHANTS } from './enchant.js';
 import { brew, potionEffects } from './effects.js';
 import { ShaderPipeline, makeSkyDome } from './shaders.js';
+import { Redstone, DIRS6 } from './redstone.js';
 import { TouchControls, IS_TOUCH } from './touch.js';
 
 const $ = (s) => document.querySelector(s);
@@ -312,6 +313,7 @@ class Game {
     }
     this.dim = dim;
     const d = this.dimData[dim];
+    this.redstone = new Redstone(this);
     this.world = new World(this, dim, this.seed, d?.chunks);
     if (d?.tiles) for (const [k, v] of Object.entries(d.tiles)) this.world.tiles.set(k, v);
     this.scene.add(this.world.group);
@@ -700,6 +702,8 @@ class Game {
     let t = this.world.tiles.get(k);
     if (!t || t.type !== type) {
       t = type === 'chest' ? { type, items: new Array(27).fill(null) }
+        : type === 'dispenser' ? { type, items: new Array(9).fill(null) }
+        : type === 'hopper' ? { type, items: new Array(5).fill(null) }
         : type === 'brewing' ? { type, items: [null, null, null, null, null], fuel: 0, time: 0 }
           : { type, items: [null, null, null], burn: 0, burnMax: 0, cook: 0, xp: 0 };
       if (type === 'chest' && this.dim === 'overworld' && this.world.gen.stronghold && Math.abs(x - this.world.gen.stronghold.x) < 8 && Math.abs(z - this.world.gen.stronghold.z) < 8 && !this.world.tiles.has(k)) {
@@ -709,6 +713,60 @@ class Game {
       this.world.tiles.set(k, t);
     }
     return t;
+  }
+
+  // ---------------------------------------------------------------- redstone helpers
+  toggleDoor(x, y, z, want) {
+    const w = this.world;
+    const m = w.getMeta(x, y, z);
+    const id = w.getBlock(x, y, z);
+    const by = m & 4 ? y - 1 : y;
+    const bm = w.getMeta(x, by, z);
+    const open = want ?? !(bm & 8);
+    if (open === !!(bm & 8)) return;
+    const nm = ((open ? (bm + 1) : (bm + 3)) & 3) | (open ? 8 : 0);
+    w.setBlock(x, by, z, id, nm, { noUpdate: true, redstone: true });
+    if (w.getBlock(x, by + 1, z) === id) w.setBlock(x, by + 1, z, id, nm | 4, { noUpdate: true, redstone: true });
+    this.sfx('door', x, y, z);
+  }
+  igniteTNT(x, y, z) { this.world.setBlock(x, y, z, 0); this.addEntity(new PrimedTNT(this, x, y, z)); this.sfx('fuse', x, y, z); }
+  playNote(x, y, z, m) {
+    const below = BLOCKS[this.world.getBlock(x, y - 1, z)]?.name ?? '';
+    const inst = /stone|ore|brick|obsidian|netherrack/.test(below) ? 'bass' : /sand|gravel/.test(below) ? 'snare' : /glass/.test(below) ? 'click' : /gold/.test(below) ? 'bell' : /wool/.test(below) ? 'guitar' : 'harp';
+    playSound(`note:${inst}:${m}`);
+    this.particles.spawn(x + 0.5, y + 1.2, z + 0.5, new THREE.Color().setHSL(m / 24, 1, 0.5), new THREE.Vector3(0, 1, 0), 0.8, 0.15, 0);
+  }
+  dispense(x, y, z, dropper) {
+    const w = this.world;
+    const t = this.getTile(x, y, z, 'dispenser');
+    const slots = t.items.map((s, i) => (s ? i : -1)).filter((i) => i >= 0);
+    if (!slots.length) { this.sfx('click'); return; }
+    const i = slots[Math.floor(Math.random() * slots.length)];
+    const s = t.items[i];
+    const [dx, dy, dz] = DIRS6[w.getMeta(x, y, z) & 7];
+    const fx = x + dx, fy = y + dy, fz = z + dz;
+    const take = () => { s.count--; if (s.count <= 0) t.items[i] = null; };
+    const it = ITEMS[s.id];
+    // dropper pushes into a container in front, otherwise drops
+    const front = w.tiles.get(`${fx},${fy},${fz}`);
+    if (dropper && front?.items) { const free = front.items.findIndex((d) => !d || (d.id === s.id && d.count < it.stack)); if (free >= 0) { if (front.items[free]) front.items[free].count++; else front.items[free] = { ...copyStack(s, 1) }; take(); } return; }
+    const pos = new THREE.Vector3(x + 0.5 + dx * 0.7, y + 0.5 + dy * 0.7, z + 0.5 + dz * 0.7);
+    const dir = new THREE.Vector3(dx, dy + 0.1, dz);
+    if (!dropper) {
+      const throwKind = { arrow: 'arrow', snowball: 'snowball', egg: 'egg', splash_potion: 'splash', experience_bottle: 'xp_bottle' }[it.name];
+      if (throwKind) { const pr = new Projectile(this, throwKind, pos, dir.multiplyScalar(throwKind === 'arrow' ? 40 : 18), null); if (throwKind === 'splash') pr.potion = s.data?.potion; this.addEntity(pr); take(); this.sfx('bow'); return; }
+      if (it.name === 'fire_charge' || it.name === 'flint_and_steel') { if (!w.getBlock(fx, fy, fz)) w.setBlock(fx, fy, fz, B.fire); if (it.name === 'fire_charge') take(); return; }
+      if (it.name === 'water_bucket' || it.name === 'lava_bucket') { if (!w.getBlock(fx, fy, fz) || BLOCKS[w.getBlock(fx, fy, fz)].replaceable) { w.setBlock(fx, fy, fz, it.name === 'water_bucket' ? B.water : B.lava); t.items[i] = { id: I.bucket, count: 1, dmg: 0 }; } return; }
+      if (it.name === 'bucket') { const fid = w.getBlock(fx, fy, fz); if ((fid === B.water || fid === B.lava) && w.getMeta(fx, fy, fz) === 0) { w.setBlock(fx, fy, fz, 0); t.items[i] = { id: fid === B.water ? I.water_bucket : I.lava_bucket, count: 1, dmg: 0 }; } return; }
+      if (it.name === 'bone_meal') { const cid = w.getBlock(fx, fy, fz); if (cid >= B.wheat_0 && cid <= B.potatoes_7 && (cid - B.wheat_0) % 8 < 7) { w.setBlock(fx, fy, fz, Math.min(cid + 3, cid - ((cid - B.wheat_0) % 8) + 7)); take(); } return; }
+      if (it.name === 'tnt') { take(); this.addEntity(new PrimedTNT(this, fx, fy, fz)); return; }
+      if (it.kind === 'armor') { const p = this.player; if (p.pos.distanceTo(new THREE.Vector3(fx + 0.5, fy, fz + 0.5)) < 1.5 && !p.armor[it.slot]) { p.armor[it.slot] = copyStack(s, 1); take(); this.ui.refresh(); return; } }
+    }
+    const e = new ItemEntity(this, pos.x, pos.y, pos.z, copyStack(s, 1));
+    e.vel.copy(dir.multiplyScalar(6));
+    this.addEntity(e);
+    take();
+    this.sfx('click');
   }
 
   countBookshelves(x, y, z) {
@@ -1494,6 +1552,7 @@ class Game {
     // fixed-rate world tick (20 tps)
     this.time++;
     this.world.tick();
+    this.redstone?.update();
     if (this.world.tickCount % 2 === 0) this.tickFurnaces();
     if (this.world.tickCount % 20 === 0 && this.player && !this.player.dead) { this.spawnTick(); this.structureTick(); }
   }

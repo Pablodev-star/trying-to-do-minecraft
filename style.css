@@ -217,3 +217,6 @@ body.touch #effects { top: calc(56px + env(safe-area-inset-top)); }
 .arrow.x { background: linear-gradient(90deg, #c03030 0 70%, transparent 70%); }
 .old-price { position: absolute; left: 1px; top: -1px; font-size: calc(6px * var(--s)); color: #c03030; text-decoration: line-through; }
 .trades { max-height: calc(110px * var(--s)); overflow-y: auto; }
+
+.center-grid { justify-content: center; margin: 4px auto; width: max-content; }
+.g5 { grid-template-columns: repeat(5, var(--slot)); }

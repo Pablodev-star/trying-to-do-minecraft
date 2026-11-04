@@ -311,6 +311,13 @@ export class UI {
       bottom.appendChild(hot);
       addSlot(bottom, { get: () => null, set: () => {}, trash: true, group: 'trash' }, 'trash');
       panel.appendChild(bottom);
+    } else if (name === 'container') {
+      const d = this.screenData;
+      panel.appendChild(el('div', 'label', d.title));
+      const g = el('div', 'grid g' + d.cols + ' center-grid');
+      for (let i = 0; i < d.tile.items.length; i++) { const k = i; addSlot(g, { get: () => d.tile.items[k], set: (v) => { d.tile.items[k] = v; }, group: 'chest' }); }
+      panel.appendChild(g);
+      playerInv(panel);
     } else if (name === 'brewing') {
       const te = this.screenData;
       panel.appendChild(el('div', 'label', 'Soporte para pociones'));
@@ -653,12 +660,12 @@ export class UI {
     const it = ITEMS[def.get().id];
     switch (def.group) {
       case 'hotbar':
-        if (this.screen === 'chest') return by(['chest']);
+        if (this.screen === 'chest' || this.screen === 'container') return by(['chest']);
         if (this.screen === 'furnace') return SMELTING[it.name] ? by(['f_in']) : fuelTime(it.id) ? by(['f_fuel']) : by(['main']);
         if (it.armor != null && this.screen === 'inventory') return [...by(['armor']), ...by(['main'])];
         return by(['main']);
       case 'main':
-        if (this.screen === 'chest') return by(['chest']);
+        if (this.screen === 'chest' || this.screen === 'container') return by(['chest']);
         if (this.screen === 'furnace') return SMELTING[it.name] ? by(['f_in']) : fuelTime(it.id) ? by(['f_fuel']) : by(['hotbar']);
         if (it.armor != null && this.screen === 'inventory') return [...by(['armor']), ...by(['hotbar'])];
         return by(['hotbar']);

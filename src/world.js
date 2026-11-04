@@ -64,10 +64,21 @@ const FACES = [
 // facing meta -> face index of the front: 0 south(+z) 1 west(-x) 2 north(-z) 3 east(+x)
 const FRONT_FACE = [4, 1, 5, 0];
 const AO_CURVE = [0.45, 0.62, 0.8, 1.0];
+let UVROT = 0;
+const wireTint = [1, 0, 0];
 
+// facing6 meta -> face index of the front (0 +x, 1 -x, 2 +y, 3 -y, 4 +z, 5 -z)
+const FRONT6 = [3, 2, 5, 4, 1, 0];
+const OPP = [1, 0, 3, 2, 5, 4];
 function texFor(b, faceIdx, meta) {
   const t = b.tex;
   if (typeof t === 'string') return t;
+  if (b.facing6) {
+    const front = FRONT6[meta & 7];
+    if (faceIdx === front) return t.front;
+    if (faceIdx === OPP[front]) return t.back ?? t.bottom;
+    return t.side;
+  }
   const f = FACES[faceIdx];
   if (f.side === 'top') return t.top;
   if (f.side === 'bottom') return t.bottom;
@@ -120,6 +131,7 @@ export class World {
     c = new Chunk(cx, cz, g.data, g.biomes, meta);
     if (sv) c.modified = true;
     this.chunks.set(k, c);
+    this.game?.redstone?.scanChunk(c, CS);
     for (let i = 0; i < g.data.length; i++) if (g.data[i] === B.spawner) this.spawners.add(`${(i & 15) + cx * CS},${i >> 8},${((i >> 4) & 15) + cz * CS}`);
     // neighbours need relight/remesh for borders
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
@@ -195,6 +207,7 @@ export class World {
         if (te.items && this.game?.dropTileItems) this.game.dropTileItems(x, y, z, te.items);
       }
     }
+    if (!opts.redstone && this.game?.redstone) this.game.redstone.onBlockChanged(x, y, z, old, id);
     if (!opts.noUpdate) this.neighborUpdate(x, y, z);
     return true;
   }
@@ -552,9 +565,12 @@ export class World {
             if (OPAQUE[nid] || (nid === id && (b.render === 'portal' || b.shape === 'pane'))) continue;
           }
           let tex = texFor(b, f, meta);
-          if (b.shape === 'door') tex = meta & 4 ? 'door_top' : 'door_bottom';
+          if (b.shape === 'door') tex = b.name === 'iron_door' ? (meta & 4 ? 'iron_door_top' : 'iron_door_bottom') : (meta & 4 ? 'door_top' : 'door_bottom');
+          if (b.shape === 'wire') { const p = meta & 15; wireTint[0] = 0.32 + 0.68 * p / 15; wireTint[1] = 0.02 + 0.1 * (p / 15) ** 3; wireTint[2] = 0.02; }
+          UVROT = b.topRot && F.side === 'top' ? meta & 3 : 0;
           if (b.shape === 'bed' && F.side === 'top') tex = meta & 4 ? 'bed_top' : 'bed_foot';
-          emitFace(buf, F, x, y, z, tex, tint, getP, getL, box, !!b.shape && b.shape !== 'slab' && b.shape !== 'stairs' ? true : b.shape ? false : true, b.render === 'portal', b.render === 'portal' ? 5 : 0);
+          emitFace(buf, F, x, y, z, tex, b.shape === 'wire' ? wireTint : tint, getP, getL, box, !!b.shape && b.shape !== 'slab' && b.shape !== 'stairs' ? true : b.shape ? false : true, b.render === 'portal', b.render === 'portal' ? 5 : 0);
+          UVROT = 0;
         }
       }
     }
@@ -692,6 +708,7 @@ function emitFace(buf, F, x, y, z, tex, tint, getP, getL, box, noAO = false, fla
     if (n[0] !== 0) { su = n[0] > 0 ? 1 - (c[2] ? z1 : z0) : (c[2] ? z1 : z0); sv = 1 - (c[1] ? y1 : y0); }
     else if (n[1] !== 0) { su = c[0] ? x1 : x0; sv = n[1] > 0 ? (c[2] ? z1 : z0) : 1 - (c[2] ? z1 : z0); }
     else { su = n[2] > 0 ? (c[0] ? x1 : x0) : 1 - (c[0] ? x1 : x0); sv = 1 - (c[1] ? y1 : y0); }
+    if (UVROT) { for (let r = 0; r < UVROT; r++) { const t = su; su = 1 - sv; sv = t; } }
     const eps = 0.0005;
     buf.uv.push(u0 + (eps + su * (1 - 2 * eps)) * us, v0 + (eps + sv * (1 - 2 * eps)) * us);
     // AO + smooth light
