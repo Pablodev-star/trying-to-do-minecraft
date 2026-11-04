@@ -418,7 +418,7 @@ export class Mob extends Entity {
     // environment damage
     if (this.inLava && !this.info.fireImmune) { this.fire = 8; this.hurt(4, null); }
     if (this.fire > 0) { this.fire -= dt; if (!this.info.fireImmune && Math.random() < dt) this.hurt(1, null); if (this.inWater) this.fire = 0; }
-    if (this.info.burns && this.game.world.hasSky && this.game.daylightLevel > 0.6 && !this.inWater && !this.baby) {
+    if (this.info.burns && this.game.world.hasSky && this.game.daylightLevel > 0.5 && !this.inWater && !this.baby && !(this.game.weather?.rain > 0.3)) {
       const l = this.world.getLight(Math.floor(this.pos.x), Math.floor(this.pos.y + 1.6), Math.floor(this.pos.z));
       if ((l >> 4) >= 15) this.fire = Math.max(this.fire, 3);
     }

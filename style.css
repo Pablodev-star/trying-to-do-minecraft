@@ -171,3 +171,6 @@ body.touch .slot:hover::after { display: none; }
 @media (orientation: portrait) and (pointer: coarse) {
   body.touch::after { content: 'Gira el dispositivo para jugar mejor en horizontal'; position: fixed; left: 50%; top: 40%; transform: translateX(-50%); background: rgba(0,0,0,0.6); padding: 8px 12px; font-size: 14px; z-index: 3; pointer-events: none; white-space: nowrap; }
 }
+
+.opt-grid .mc-btn.on { color: #ffffa0; background: #4a6a2a linear-gradient(#5a8a32, #3a5a22); }
+.opt-note { grid-column: 1 / -1; font-size: calc(6px * var(--s)); color: #c0c0c0; font-weight: normal; text-align: left; }

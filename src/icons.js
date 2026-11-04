@@ -32,7 +32,12 @@ export function iconFor(id) {
   const sprite = it && itemSpriteCanvas(it.name);
   const b = id < 256 ? BLOCKS[id] : null;
   if (sprite) g.drawImage(sprite, 0, 0, SIZE, SIZE);
-  else if (b && (b.render === 'cross' || b.name === 'torch' || b.name === 'soul_torch' || b.name === 'ladder' || b.name === 'oak_door')) {
+  else if (b && b.shape === 'fence') {
+    const tc = tileCanvas(b.tex);
+    g.save(); g.beginPath();
+    for (const [x0, y0, w, h] of [[6, 2, 5, 28], [21, 2, 5, 28], [0, 8, 32, 4], [0, 18, 32, 4]]) g.rect(x0, y0, w, h);
+    g.clip(); g.drawImage(tc, 0, 0, SIZE, SIZE); g.fillStyle = 'rgba(0,0,0,0.15)'; g.fillRect(0, 0, SIZE, SIZE); g.restore();
+  } else if (b && (b.render === 'cross' || b.shape === 'torch' || b.shape === 'pane' || b.shape === 'door' || b.name === 'ladder' || b.name === 'lantern')) {
     const name = typeof b.tex === 'string' ? b.tex : b.tex.side;
     let tc = tileCanvas(name);
     if (b.tint) tc = tinted(tc, '#79c05a');
@@ -40,7 +45,7 @@ export function iconFor(id) {
   } else if (b) {
     // isometric cube: top, left (front), right (side)
     const top = texCanvas(b, 'top'), left = texCanvas(b, 'front'), right = texCanvas(b, 'side');
-    const h = b.box ? (b.box[4] - b.box[1]) / 16 : 1;
+    const h = b.shape === 'slab' ? 0.5 : b.box ? (b.box[4] - b.box[1]) / 16 : 1;
     const s = SIZE / 32;
     const yoff = (1 - h) * 8 * s;
     // top face

@@ -567,6 +567,8 @@ export class UI {
         <button class="mc-btn" id="o-diff">Dificultad: ${{ peaceful: 'Pacífico', easy: 'Fácil', normal: 'Normal', hard: 'Difícil' }[o.difficulty]}</button>
         <button class="mc-btn" id="o-bob">Movimiento de cámara: ${o.bobbing ? 'SÍ' : 'NO'}</button>
         <button class="mc-btn" id="o-clouds">Nubes: ${o.clouds ? 'SÍ' : 'NO'}</button>
+        <button class="mc-btn ${o.shaders ? 'on' : ''}" id="o-shaders">Shaders: ${o.shaders ? 'SÍ' : 'NO'}</button>
+        <div class="opt-note">Shaders: sombras, agua con reflejos, plantas que se mueven con el viento, rayos de sol y colores cinematográficos. Necesitan un equipo potente.</div>
       </div>
       <button class="mc-btn" id="o-done">Listo</button>`, 'options-menu' + (fromTitle ? ' dirt' : ''));
     const bind = (id, key, after) => {
@@ -578,6 +580,7 @@ export class UI {
     $('#o-diff', m).onclick = () => { const l = ['peaceful', 'easy', 'normal', 'hard']; o.difficulty = l[(l.indexOf(o.difficulty) + 1) % 4]; this.options(back, fromTitle); };
     $('#o-bob', m).onclick = () => { o.bobbing = !o.bobbing; this.options(back, fromTitle); };
     $('#o-clouds', m).onclick = () => { o.clouds = !o.clouds; this.options(back, fromTitle); };
+    $('#o-shaders', m).onclick = () => { o.shaders = !o.shaders; if (o.shaders && !this.game.pipeline) { o.shaders = false; this.game.chat('Tu navegador no soporta los shaders.'); } this.game.saveOptions(); this.options(back, fromTitle); };
     $('#o-done', m).onclick = () => { this.game.saveOptions(); back(); };
   }
   death(msg, score) {

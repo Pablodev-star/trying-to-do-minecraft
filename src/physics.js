@@ -1,6 +1,6 @@
 // AABB vs voxel collision shared by the player and all entities.
 import { BLOCKS } from './registry.js';
-import { rotateBox } from './world.js';
+import { blockBoxesAt } from './shapes.js';
 
 const EPS = 1e-4;
 
@@ -14,11 +14,8 @@ export function collectBoxes(world, x0, y0, z0, x1, y1, z1) {
         if (!id) continue;
         const b = BLOCKS[id];
         if (!b.solid) continue;
-        if (b.box) {
-          let bx = b.box.map((v) => v / 16);
-          if (b.orient) bx = rotateBox(bx, world.getMeta(x, y, z) & 3);
-          out.push([x + bx[0], y + bx[1], z + bx[2], x + bx[3], y + bx[4], z + bx[5]]);
-        } else out.push([x, y, z, x + 1, y + 1, z + 1]);
+        if (b.box || b.shape) { for (const bx of blockBoxesAt(world, b, x, y, z, true)) out.push(bx); }
+        else out.push([x, y, z, x + 1, y + 1, z + 1]);
       }
   return out;
 }
