@@ -37,6 +37,8 @@ function block(name, display, p = {}) {
     shape: p.shape ?? null,             // slab | stairs | fence | pane | torch | door | bed
     base: p.base ?? null,               // full block a double slab turns into
     anim: p.anim ?? 0,                  // animated texture: 1 water, 2 lava, 3 portal
+    facing6: p.facing6 ?? false,        // meta 0..5 = facing direction (pistons, observers, dispensers)
+    topRot: p.topRot ?? false,          // top texture rotates with meta & 3
   };
   BLOCKS.push(def); B[name] = id;
   if (!def.noItem) { ITEMS[id] = { id, name, display, stack: p.stack ?? 64, block: id, kind: 'block' }; I[name] = id; }

@@ -170,7 +170,7 @@ export class UI {
     if (!this.screen) return;
     const p = this.game.player;
     // return crafting grid and cursor items
-    const ret = (arr) => { for (let i = 0; i < arr.length; i++) if (arr[i]) { const left = p.give(arr[i].id, arr[i].count, arr[i].dmg); if (left) this.game.spawnItem(p.pos.x, p.pos.y + 1.2, p.pos.z, { ...arr[i], count: left }); arr[i] = null; } };
+    const ret = (arr) => { for (let i = 0; i < arr.length; i++) if (arr[i]) { const left = p.give(arr[i].id, arr[i].count, arr[i].dmg, arr[i].data); if (left) this.game.spawnItem(p.pos.x, p.pos.y + 1.2, p.pos.z, { ...arr[i], count: left }); arr[i] = null; } };
     ret(this.craft2); ret(this.craft3); ret(this.work);
     if (this.cursor) { ret([this.cursor]); this.cursor = null; }
     this.screen = null;
@@ -385,7 +385,8 @@ export class UI {
       addSlot(row, { get: () => this.work[1], set: (v) => { this.work[1] = v; }, group: 'work' });
       row.appendChild(el('div', 'arrow'));
       const res = this.workResult(name);
-      addSlot(row, { get: () => res?.stack ?? null, set: () => {}, output: true, takeAll: true, consume: () => this.consumeWork(name, res), group: 'output' }, 'big');
+      const affordable = res && (name !== 'anvil' || p.mode === 'creative' || p.level >= res.cost);
+      addSlot(row, { get: () => (affordable ? res.stack : null), set: () => {}, output: true, takeAll: true, consume: () => this.consumeWork(name, res), group: 'output' }, 'big');
       area.appendChild(row);
       if (name === 'anvil' && res) area.appendChild(el('div', 'cost ' + (p.level >= res.cost || p.mode === 'creative' ? 'ok' : 'bad'), `Coste de experiencia: ${res.cost}`));
       panel.appendChild(area);
@@ -396,9 +397,10 @@ export class UI {
       const row = el('div', 'craft-row');
       addSlot(row, { get: () => this.work[0], set: (v) => { this.work[0] = v; }, group: 'work' });
       const opts = el('div', 'grid g4 cut-opts');
-      const outs = this.work[0] ? stonecutterOutputs(ITEMS[this.work[0].id].name) : [];
+      const inName = this.work[0] ? ITEMS[this.work[0].id].name : null;
+      const outs = inName ? stonecutterOutputs(inName) : [];
       for (const [n, c] of outs) {
-        addSlot(opts, { get: () => ({ id: I[n], count: c, dmg: 0 }), set: () => {}, output: true, consume: () => { this.work[0].count--; if (this.work[0].count <= 0) this.work[0] = null; }, group: 'output' });
+        addSlot(opts, { get: () => (this.work[0]?.count > 0 && ITEMS[this.work[0].id].name === inName ? { id: I[n], count: c, dmg: 0 } : null), set: () => {}, output: true, consume: () => { this.work[0].count--; if (this.work[0].count <= 0) this.work[0] = null; }, group: 'output' });
       }
       row.appendChild(opts);
       area.appendChild(row);
@@ -591,15 +593,15 @@ export class UI {
         for (let n = 0; n < 64; n++) {
           const s = def.get();
           if (!s) break;
-          const left = p.give(s.id, s.count, s.dmg);
+          const left = p.give(s.id, s.count, s.dmg, s.data);
           def.consume();
-          if (left) { this.game.spawnItem(p.pos.x, p.pos.y + 1, p.pos.z, { id: s.id, count: left }); break; }
+          if (left) { this.game.spawnItem(p.pos.x, p.pos.y + 1, p.pos.z, { ...s, count: left }); break; }
           if (def.takeAll) break;
           this.renderScreen();
         }
         this.game.sfx('craft');
       } else {
-        if (this.cursor && (this.cursor.id !== stack.id || this.cursor.count + stack.count > maxStack(stack.id))) return;
+        if (this.cursor && (!sameKind(this.cursor, stack) || this.cursor.count + stack.count > maxStack(stack.id))) return;
         if (this.cursor) this.cursor.count += stack.count; else this.cursor = clone(stack);
         def.consume();
       }

@@ -16,6 +16,7 @@ import { brew, potionEffects } from './effects.js';
 import { ShaderPipeline, makeSkyDome } from './shaders.js';
 import { Redstone, DIRS6 } from './redstone.js';
 import { TouchControls, IS_TOUCH } from './touch.js';
+import { migrateSave } from './legacy.js';
 
 const $ = (s) => document.querySelector(s);
 const TPS = 20;
@@ -1842,15 +1843,6 @@ function deleteWorld(id) {
   localStorage.removeItem('mc_world_' + id);
 }
 // Version 1 saves stored items from id 256; version 2 moves them to 1024 to make room for blocks.
-function migrateSave(save) {
-  if (!save || (save.version ?? 1) >= 2) return save;
-  const fix = (s) => { if (s && s.id >= 256) s.id += 1024 - 256; };
-  const p = save.player;
-  if (p) { (p.inventory ?? []).forEach(fix); (p.armor ?? []).forEach(fix); }
-  for (const d of Object.values(save.dims ?? {})) for (const t of Object.values(d.tiles ?? {})) (t.items ?? []).forEach(fix);
-  save.version = 2;
-  return save;
-}
 function readWorld(id) { try { return JSON.parse(localStorage.getItem('mc_world_' + id)); } catch { return null; } }
 
 let audioUnlocked = false;
