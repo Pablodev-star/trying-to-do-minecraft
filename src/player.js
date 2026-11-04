@@ -173,8 +173,9 @@ export class Player {
     if (input.back) fz += 1;
     if (input.left) fx -= 1;
     if (input.right) fx += 1;
-    const len = Math.hypot(fx, fz) || 1;
-    fx /= len; fz /= len;
+    if (input.analog) { fx = input.ax ?? 0; fz = input.az ?? 0; if (Math.hypot(fx, fz) < 0.15) { fx = 0; fz = 0; } }
+    const len = Math.hypot(fx, fz);
+    if (len > 1 || (!input.analog && len > 0)) { fx /= len; fz /= len; }
     const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
     const mx = fx * cos + fz * sin, mz = -fx * sin + fz * cos;
     this.sneaking = input.sneak && !this.flying;

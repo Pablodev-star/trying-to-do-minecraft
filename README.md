@@ -30,6 +30,23 @@ python3 -m http.server 8000
 | F1 / F2 / F3 / F5 | Ocultar HUD / captura de pantalla / depuración / tercera persona |
 | Esc | Pausa |
 
+### Móvil y tablet
+
+Se detecta automáticamente en pantallas táctiles (o fuerzalo con `?touch=1` en la URL). Juega en horizontal; al entrar a un mundo intenta ponerse en pantalla completa.
+
+| Gesto / botón | Acción |
+|---|---|
+| Joystick (izquierda) | Moverse (empuja al máximo hacia delante para correr) |
+| Arrastrar en la pantalla | Mirar |
+| Toque corto | Usar / colocar / golpear al mob apuntado |
+| Mantener pulsado | Romper bloques (o comer / tensar el arco si lo llevas en la mano) |
+| ▲ | Saltar (doble toque en creativo: volar; mantener volando: subir) |
+| ● | Agacharse (activa/desactiva; volando: bajar) |
+| Barra inferior | Tocar un hueco para seleccionarlo |
+| II · T · F5 · Q · E | Pausa · chat · cámara · soltar · inventario |
+
+En el inventario táctil: toque para coger o dejar, mantener para la mitad o de uno en uno, el botón "Mover rápido" hace de Shift y "Cerrar" sale.
+
 En el inventario: clic izquierdo para coger o dejar, clic derecho para la mitad o de uno en uno, Shift+clic para mover rápido y 1-9 para intercambiar con la barra.
 
 ## Contenido

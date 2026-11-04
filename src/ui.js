@@ -25,7 +25,7 @@ export class UI {
     document.body.appendChild(this.tooltip);
     this.cursorEl = el('div', 'cursor-item hidden');
     document.body.appendChild(this.cursorEl);
-    document.addEventListener('mousemove', (e) => {
+    document.addEventListener('pointermove', (e) => {
       this.mouseX = e.clientX; this.mouseY = e.clientY;
       this.cursorEl.style.left = e.clientX + 'px'; this.cursorEl.style.top = e.clientY + 'px';
       this.tooltip.style.left = e.clientX + 14 + 'px'; this.tooltip.style.top = e.clientY - 26 + 'px';
@@ -328,19 +328,48 @@ export class UI {
     }
     // bind slot events
     panel.querySelectorAll('.slot[data-i]').forEach((d) => {
-      d.addEventListener('mousedown', (e) => { e.preventDefault(); this.clickSlot(Number(d.dataset.i), e.button, e.shiftKey); });
+      d.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        const i = Number(d.dataset.i);
+        if (e.pointerType === 'touch') {
+          // tap = left click, long press = right click; quick-move toggle acts as Shift
+          clearTimeout(this.pressTimer);
+          this.pressFired = false;
+          this.pressTimer = setTimeout(() => { this.pressFired = true; this.clickSlot(i, 2, this.quickMove); }, 380);
+          const sx = e.clientX, sy = e.clientY;
+          const done = () => { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', cancel); };
+          const up = () => { clearTimeout(this.pressTimer); done(); if (!this.pressFired) this.clickSlot(i, 0, this.quickMove); };
+          const cancel = () => { clearTimeout(this.pressTimer); this.pressFired = true; done(); }; // finger dragged: it's a scroll
+          const move = (ev) => { if (ev.pointerId === e.pointerId && Math.hypot(ev.clientX - sx, ev.clientY - sy) > 6) cancel(); };
+          document.addEventListener('pointermove', move);
+          document.addEventListener('pointerup', up);
+          document.addEventListener('pointercancel', cancel);
+          return;
+        }
+        this.clickSlot(i, e.button, e.shiftKey);
+      });
       d.addEventListener('mouseenter', () => { this.hover = Number(d.dataset.i); this.showTooltip(); });
       d.addEventListener('mouseleave', () => { this.hover = null; this.tooltip.classList.add('hidden'); });
       d.addEventListener('contextmenu', (e) => e.preventDefault());
     });
     panel.addEventListener('contextmenu', (e) => e.preventDefault());
+    if (this.game.touch) {
+      const bar = el('div', 'touch-bar');
+      const qm = el('button', 'mc-btn small' + (this.quickMove ? ' on' : ''), this.quickMove ? 'Mover rápido: SÍ' : 'Mover rápido: NO');
+      qm.onclick = () => { this.quickMove = !this.quickMove; this.renderScreen(); };
+      const close = el('button', 'mc-btn small', 'Cerrar');
+      close.onclick = () => this.close();
+      bar.append(qm, close);
+      panel.appendChild(bar);
+      bar.insertAdjacentHTML('beforeend', '<span class="touch-hint">Toca: coger/dejar · Mantén: mitad/uno</span>');
+    }
     this.renderCursor();
   }
 
   showTooltip() {
     const def = this.slotDefs?.[this.hover];
     const s = def?.get();
-    if (!s || this.cursor) { this.tooltip.classList.add('hidden'); return; }
+    if (!s || this.cursor || this.game.touch) { this.tooltip.classList.add('hidden'); return; }
     const it = ITEMS[s.id];
     let html = `<div class="tt-name ${it.name.includes('golden_apple') || it.name === 'totem' ? 'rare' : ''}">${it.display}</div>`;
     if (it.damage && it.kind === 'tool') html += `<div class="tt-line">+${it.damage} de daño</div>`;
@@ -534,7 +563,7 @@ export class UI {
         <label>Distancia de renderizado: <span id="o-rd-v">${o.renderDistance}</span> chunks<input type="range" id="o-rd" min="2" max="12" value="${o.renderDistance}"></label>
         <label>Sensibilidad: <span id="o-sens-v">${o.sensitivity}</span>%<input type="range" id="o-sens" min="10" max="200" value="${o.sensitivity}"></label>
         <label>Volumen: <span id="o-vol-v">${o.volume}</span>%<input type="range" id="o-vol" min="0" max="100" value="${o.volume}"></label>
-        <label>Escala de interfaz: <span id="o-gui-v">${o.guiScale}</span><input type="range" id="o-gui" min="1" max="4" value="${o.guiScale}"></label>
+        <label>Escala de interfaz: <span id="o-gui-v">${o.guiScale}</span><input type="range" id="o-gui" min="1" max="4" step="0.5" value="${o.guiScale}"></label>
         <button class="mc-btn" id="o-diff">Dificultad: ${{ peaceful: 'Pacífico', easy: 'Fácil', normal: 'Normal', hard: 'Difícil' }[o.difficulty]}</button>
         <button class="mc-btn" id="o-bob">Movimiento de cámara: ${o.bobbing ? 'SÍ' : 'NO'}</button>
         <button class="mc-btn" id="o-clouds">Nubes: ${o.clouds ? 'SÍ' : 'NO'}</button>
