@@ -87,6 +87,17 @@ export function playSound(name, vol = 1) {
     case 'crit': burst({ freq: 3000, q: 2, dur: 0.1, vol: 0.2 }); break;
     case 'break_tool': burst({ freq: 3500, q: 4, dur: 0.25, vol: 0.25 }); break;
     case 'glass': playSound('break:glass'); break;
+    case 'anvil': tone({ freq: 1800, freq2: 1500, dur: 0.35, vol: 0.18, type: 'square' }); tone({ freq: 2700, dur: 0.25, vol: 0.08, type: 'triangle' }); break;
+    case 'grind': burst({ freq: 2500, q: 2, dur: 0.4, vol: 0.2 }); break;
+    case 'note': {
+      const [, inst, m] = name.split(':');
+      const f = 185 * Math.pow(2, Number(m) / 12);
+      const type = { harp: 'triangle', bass: 'sawtooth', snare: 'square', click: 'square', bell: 'sine', guitar: 'sawtooth' }[inst] ?? 'triangle';
+      if (inst === 'snare') burst({ freq: 3000, q: 0.6, dur: 0.12, vol: 0.2 });
+      else tone({ freq: inst === 'bass' ? f / 4 : inst === 'bell' ? f * 2 : f, dur: inst === 'bell' ? 1.2 : 0.5, vol: 0.18, type });
+      break;
+    }
+    case 'piston': burst({ freq: 400, q: 1.5, dur: 0.15, vol: 0.25 }); tone({ freq: 160, freq2: 120, dur: 0.1, vol: 0.1, type: 'square' }); break;
     case 'rain': burst({ freq: 7000, q: 0.3, dur: 0.4, vol: 0.035 * vol, type: 'highpass' }); break;
     case 'thunder': burst({ freq: 120, q: 0.3, dur: 2.8, vol: 0.9 * vol, type: 'lowpass' }); burst({ freq: 400, q: 0.4, dur: 1.2, vol: 0.35 * vol, at: 0.05 }); burst({ freq: 90, q: 0.3, dur: 2.0, vol: 0.5 * vol, type: 'lowpass', at: 0.6 }); break;
     case 'dragon': tone({ freq: 90, freq2: 60, dur: 1.5, vol: 0.3, type: 'sawtooth' }); break;

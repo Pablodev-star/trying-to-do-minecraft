@@ -58,6 +58,21 @@ export function shapeBoxes(b, meta, get) {
     }
     case 'door': return [rotateBox(px([0, 0, 13, 16, 16, 16]), meta & 3)];
     case 'bed': return [px([0, 0, 0, 16, 9, 16])];
+    case 'wire': return [px([0, 0, 0, 16, 1, 16])];
+    case 'rail': return [px([0, 0, 0, 16, 1, 16])];
+    case 'plate': return [px(meta & 8 ? [1, 0, 1, 15, 0.5, 15] : [1, 0, 1, 15, 1, 15])];
+    case 'lever': case 'button': {
+      const a = meta & 7;
+      const lever = b.shape === 'lever';
+      const pressed = meta & 8;
+      if (a === 0) return [px(lever ? [5, 0, 4, 11, 3, 12] : [5, 0, 6, 11, pressed ? 1 : 2, 10])];
+      if (a === 5) return [px(lever ? [5, 13, 4, 11, 16, 12] : [5, pressed ? 15 : 14, 6, 11, 16, 10])];
+      const base = lever ? [5, 4, 0, 11, 12, 3] : [5, 6, 0, 11, 10, pressed ? 1 : 2];
+      return [rotateBox(px(base), [2, 1, 0, 3][a - 1])];
+    }
+    case 'hopper': return [px([0, 10, 0, 16, 16, 16]), px([4, 4, 4, 12, 10, 12]), px([6, 0, 6, 10, 4, 10])];
+    case 'piston': return meta & 8 ? [face6(px([0, 0, 0, 16, 16, 12]), meta & 7)] : [[0, 0, 0, 1, 1, 1]];
+    case 'piston_head': return [face6(px([0, 0, 12, 16, 16, 16]), meta & 7), face6(px([6, 6, -4, 10, 10, 12]), meta & 7)];
     default: return b.box ? [px(b.box)] : [[0, 0, 0, 1, 1, 1]];
   }
 }
@@ -74,6 +89,20 @@ export function collisionBoxes(b, meta, get) {
   return shapeBoxes(b, meta, get);
 }
 
+// boxes are authored facing +z (south); rotate to facing6 meta (0 down,1 up,2 north,3 south,4 west,5 east)
+export function face6(bx, f) {
+  const [x0, y0, z0, x1, y1, z1] = bx;
+  let r;
+  switch (f) {
+    case 3: r = [x0, y0, z0, x1, y1, z1]; break;
+    case 2: r = [x0, y0, 1 - z1, x1, y1, 1 - z0]; break;
+    case 5: r = [z0, y0, x0, z1, y1, x1]; break;
+    case 4: r = [1 - z1, y0, x0, 1 - z0, y1, x1]; break;
+    case 1: r = [x0, z0, y0, x1, z1, y1]; break;
+    default: r = [x0, 1 - z1, y0, x1, 1 - z0, y1];
+  }
+  return r;
+}
 export function hasShape(b) { return !!b.shape || !!b.box; }
 
 // Boxes for the block at world position (x,y,z), in world coordinates.

@@ -1,10 +1,11 @@
 // Entities: mobs (with AI), dropped items, projectiles, primed TNT, falling blocks, end crystals.
 import * as THREE from '../lib/three.module.min.js';
-import { BLOCKS, B, ITEMS, I } from './registry.js';
+import { BLOCKS, B, ITEMS, I, sameKind } from './registry.js';
 import { moveEntity, aabbIntersectsBlocks } from './physics.js';
 import { buildModel, setTint } from './models.js';
 import { atlasCanvas, tileUV, itemSpriteCanvas, tileCanvas } from './textures.js';
 import { SOLID } from './world.js';
+import { PROFESSIONS, JOB_BLOCK, initVillager, restock } from './villagers.js';
 
 const GRAV = 32;
 let nextEntityId = 1;
@@ -52,7 +53,7 @@ export function makeSpriteMesh(id, size = 1) {
   return new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat.clone());
 }
 export function makeItemMesh(id, size) {
-  if (id < 256 && BLOCKS[id] && BLOCKS[id].render !== 'cross' && !itemSpriteCanvas(ITEMS[id]?.name)) return makeBlockMesh(id, size * 0.55);
+  if (id < 1024 && BLOCKS[id] && BLOCKS[id].render !== 'cross' && !itemSpriteCanvas(ITEMS[id]?.name)) return makeBlockMesh(id, size * 0.55);
   return makeSpriteMesh(id, size);
 }
 
@@ -121,7 +122,7 @@ export class ItemEntity extends Entity {
     this.inner.material.color?.setRGB(l, l, l);
     // merge with nearby equal stacks
     if (((this.age * 4) | 0) % 4 === 0) for (const e of this.game.entities) {
-      if (e !== this && e instanceof ItemEntity && !e.remove && e.stack.id === this.stack.id && !this.stack.dmg && !e.stack.dmg && e.pos.distanceToSquared(this.pos) < 0.6) {
+      if (e !== this && e instanceof ItemEntity && !e.remove && sameKind(e.stack, this.stack) && e.pos.distanceToSquared(this.pos) < 0.6) {
         const max = ITEMS[this.stack.id].stack;
         if (this.stack.count + e.stack.count <= max) { this.stack.count += e.stack.count; e.remove = true; }
       }
@@ -179,19 +180,24 @@ export class Projectile extends Entity {
     this.vel.copy(vel);
     this.w = 0.25; this.h = 0.25;
     this.stuck = false;
-    const g = { arrow: 0.05, snowball: 0.03, egg: 0.03, ender_pearl: 0.03, fireball: 0, small_fireball: 0, potion: 0.05, eye: 0 }[kind] ?? 0.03;
+    const g = { levitation_bolt: 0, water_bolt: 0, spit: 0.03, ash_skull: 0, arrow: 0.05, snowball: 0.03, egg: 0.03, ender_pearl: 0.03, fireball: 0, small_fireball: 0, potion: 0.05, splash: 0.05, xp_bottle: 0.05, eye: 0 }[kind] ?? 0.03;
     this.grav = g * 400;
     if (kind === 'arrow') {
       const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.6), new THREE.MeshLambertMaterial({ color: 0x8a6436 }));
       const tip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.1), new THREE.MeshLambertMaterial({ color: 0x9a9a9a }));
       tip.position.z = 0.3; shaft.add(tip);
       this.inner = shaft;
+    } else if (kind === 'levitation_bolt' || kind === 'water_bolt' || kind === 'spit' || kind === 'ash_skull') {
+      const col = { levitation_bolt: 0xf0e0ff, water_bolt: 0x5ac8e8, spit: 0xe8e8d8, ash_skull: 0x2a2626 }[kind];
+      const s = kind === 'ash_skull' ? 0.5 : 0.25;
+      this.inner = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), new THREE.MeshBasicMaterial({ color: col }));
+      this.homing = kind === 'levitation_bolt';
     } else if (kind === 'fireball' || kind === 'small_fireball') {
       const s = kind === 'fireball' ? 0.9 : 0.35;
       this.inner = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), new THREE.MeshBasicMaterial({ color: kind === 'fireball' ? 0xff7a1a : 0xffb030 }));
       this.w = this.h = s;
     } else {
-      const id = { snowball: I.snowball, egg: I.egg, ender_pearl: I.ender_pearl, potion: I.glowstone_dust, eye: I.ender_eye }[kind];
+      const id = { snowball: I.snowball, egg: I.egg, ender_pearl: I.ender_pearl, potion: I.splash_potion, splash: I.splash_potion, xp_bottle: I.experience_bottle, eye: I.ender_eye }[kind];
       this.inner = makeSpriteMesh(id, 0.35);
     }
     this.mesh.add(this.inner);
@@ -201,6 +207,7 @@ export class Projectile extends Entity {
     if (this.age > 60) { this.remove = true; return; }
     if (this.kind === 'eye') return this.updateEye(dt);
     if (this.stuck) { if (this.age > 30) this.remove = true; return; }
+    if (this.homing && this.game.player && this.age < 6) { const to = this.game.player.pos.clone().add(new THREE.Vector3(0, 1, 0)).sub(this.pos).normalize().multiplyScalar(8); this.vel.lerp(to, Math.min(1, dt * 1.5)); }
     this.vel.y -= this.grav * dt;
     const steps = Math.ceil(this.vel.length() * dt / 0.2);
     const step = this.vel.clone().multiplyScalar(dt / steps);
@@ -226,11 +233,19 @@ export class Projectile extends Entity {
   impactEntity(e) {
     const k = this.kind;
     if (e.type === 'enderman' && k !== 'ender_pearl') { e.teleport(); this.remove = true; return; }
-    if (k === 'arrow') e.hurt(Math.max(2, Math.ceil(this.vel.length() / 60 * 9 * (this.power ?? 1))), this.owner, this.vel.clone().normalize());
+    if (k === 'arrow') {
+      const dir = this.vel.clone().normalize().multiplyScalar(1 + (this.punch ?? 0) * 1.2);
+      if (e.hurt(Math.max(2, Math.ceil(this.vel.length() / 60 * 9 * (this.power ?? 1))), this.owner, dir) && this.flame && e.fire != null) e.fire = Math.max(e.fire, 5);
+    }
+    else if (k === 'levitation_bolt') { e.hurt(4, this.owner); if (e.addEffect) e.addEffect('levitation', 10, 0); }
+    else if (k === 'water_bolt') e.hurt(6, this.owner, this.vel.clone().normalize());
+    else if (k === 'spit') e.hurt(1, this.owner, this.vel.clone().normalize());
+    else if (k === 'ash_skull') { e.hurt(8, this.owner); if (e.addEffect) e.addEffect('wither', 10, 1); this.game.explode(this.pos.x, this.pos.y, this.pos.z, 1, false); }
+    else if (k === 'splash' || k === 'potion') { this.game.splashPotion(this.pos, this.potion ?? 'harming', this.owner); }
+    else if (k === 'xp_bottle') { this.game.spawnXP(this.pos.x, this.pos.y, this.pos.z, 3 + Math.floor(Math.random() * 9)); this.game.sfx('glass'); }
     else if (k === 'snowball') e.hurt(e.type === 'blaze' ? 3 : 0, this.owner, this.vel.clone().normalize());
     else if (k === 'fireball') { this.game.explode(this.pos.x, this.pos.y, this.pos.z, 1, true); e.hurt(6, this.owner); }
     else if (k === 'small_fireball') { e.hurt(5, this.owner); e.fire = 5; }
-    else if (k === 'potion') e.hurt(6, this.owner);
     else if (k === 'ender_pearl') this.pearlTeleport();
     else if (k === 'egg') this.eggHatch();
     this.remove = true;
@@ -239,9 +254,12 @@ export class Projectile extends Entity {
     const k = this.kind;
     if (k === 'arrow') { this.stuck = true; this.vel.set(0, 0, 0); this.age = 0; this.pickup = this.owner === this.game.player; return; }
     if (k === 'fireball') this.game.explode(this.pos.x, this.pos.y, this.pos.z, 1, true);
+    if (k === 'ash_skull') this.game.explode(this.pos.x, this.pos.y, this.pos.z, 1.2, false);
     if (k === 'small_fireball') { const p = this.pos.clone().sub(this.vel.clone().normalize().multiplyScalar(0.3)); const x = Math.floor(p.x), y = Math.floor(p.y), z = Math.floor(p.z); if (!this.world.getBlock(x, y, z)) this.world.setBlock(x, y, z, B.fire); }
     if (k === 'ender_pearl') this.pearlTeleport();
     if (k === 'egg') this.eggHatch();
+    if (k === 'splash' || k === 'potion') this.game.splashPotion(this.pos, this.potion ?? 'harming', this.owner);
+    if (k === 'xp_bottle') { this.game.spawnXP(this.pos.x, this.pos.y + 0.3, this.pos.z, 3 + Math.floor(Math.random() * 9)); this.game.sfx('glass'); }
     this.remove = true;
     void id;
   }
@@ -279,6 +297,7 @@ export const MOB_INFO = {
   wolf: { hp: 8, w: 0.6, h: 0.85, speed: 3.6, passive: true, neutral: true, damage: 4, food: ['bone'], drops: [], xp: 2 },
   horse: { hp: 22, w: 1.3, h: 1.6, speed: 3.2, passive: true, food: ['wheat', 'apple'], drops: [['leather', 0, 2]], xp: 2 },
   villager: { hp: 20, w: 0.6, h: 1.95, speed: 2.0, passive: true, drops: [], xp: 0 },
+  zombie_villager: { hp: 20, w: 0.6, h: 1.95, speed: 2.4, damage: 3, drops: [['rotten_flesh', 0, 2]], xp: 5, burns: true },
   iron_golem: { hp: 100, w: 1.4, h: 2.7, speed: 1.6, passive: true, neutral: true, damage: 15, drops: [['iron_ingot', 3, 5], ['poppy', 0, 2]], xp: 0 },
   zombie: { hp: 20, w: 0.6, h: 1.95, speed: 2.6, damage: 3, drops: [['rotten_flesh', 0, 2]], rare: [['iron_ingot', 0.025], ['carrot', 0.025], ['potato', 0.025]], xp: 5, burns: true },
   skeleton: { hp: 20, w: 0.6, h: 1.99, speed: 2.6, damage: 3, ranged: 'arrow', drops: [['bone', 0, 2], ['arrow', 0, 2]], xp: 5, burns: true },
@@ -291,8 +310,42 @@ export const MOB_INFO = {
   ghast: { hp: 10, w: 4, h: 4, speed: 1.5, flying: true, ranged: 'fireball', drops: [['ghast_tear', 0, 1], ['gunpowder', 0, 2]], xp: 5 },
   blaze: { hp: 20, w: 0.6, h: 1.8, speed: 2.3, flying: true, ranged: 'small_fireball', damage: 6, drops: [['blaze_rod', 0, 1]], xp: 10, fireImmune: true },
   ender_dragon: { hp: 200, w: 8, h: 4, speed: 12, flying: true, damage: 10, drops: [], xp: 12000, boss: true },
+  // animals
+  fox: { hp: 10, w: 0.6, h: 0.7, speed: 4.2, passive: true, food: ['sweet_berries'], drops: [], xp: 2 },
+  rabbit: { hp: 3, w: 0.4, h: 0.5, speed: 3.6, passive: true, hops: true, food: ['carrot', 'dandelion'], drops: [['rabbit', 0, 1], ['rabbit_hide', 0, 1]], rare: [['rabbit_foot', 0.1]], xp: 2 },
+  cat: { hp: 10, w: 0.6, h: 0.7, speed: 3.4, passive: true, food: ['cod', 'salmon'], drops: [['string', 0, 2]], xp: 2, tameWith: ['cod', 'salmon'] },
+  parrot: { hp: 6, w: 0.5, h: 0.9, speed: 3, passive: true, flier: true, food: ['wheat_seeds'], drops: [['feather', 1, 2]], xp: 2, tameWith: ['wheat_seeds'] },
+  panda: { hp: 20, w: 1.3, h: 1.25, speed: 1.6, passive: true, food: ['sugar_cane'], drops: [], xp: 2 },
+  bee: { hp: 10, w: 0.7, h: 0.6, speed: 3, passive: true, neutral: true, flier: true, damage: 2, onHit: 'poison', food: ['dandelion', 'poppy', 'cornflower'], drops: [], xp: 2 },
+  goat: { hp: 10, w: 0.9, h: 1.3, speed: 2.8, passive: true, food: ['wheat'], drops: [], rare: [['goat_horn', 0.1]], xp: 2 },
+  frog: { hp: 10, w: 0.5, h: 0.5, speed: 2.6, passive: true, hops: true, amphibious: true, food: ['slime_ball'], drops: [], xp: 2 },
+  turtle: { hp: 30, w: 1.2, h: 0.4, speed: 1.2, passive: true, amphibious: true, food: ['sugar_cane'], drops: [], rare: [['turtle_scute', 0.3]], xp: 2 },
+  squid: { hp: 10, w: 0.8, h: 0.8, speed: 2, passive: true, aquatic: true, drops: [['ink_sac', 1, 3]], xp: 2 },
+  cod: { hp: 3, w: 0.5, h: 0.3, speed: 3, passive: true, aquatic: true, drops: [['cod', 1, 1]], xp: 1 },
+  salmon: { hp: 3, w: 0.7, h: 0.4, speed: 3.2, passive: true, aquatic: true, drops: [['salmon', 1, 1]], xp: 1 },
+  tropical_fish: { hp: 3, w: 0.5, h: 0.4, speed: 2.6, passive: true, aquatic: true, drops: [['tropical_fish', 1, 1]], xp: 1 },
+  dolphin: { hp: 10, w: 0.9, h: 0.6, speed: 7, passive: true, neutral: true, aquatic: true, damage: 3, drops: [['cod', 0, 1]], xp: 2 },
+  polar_bear: { hp: 30, w: 1.4, h: 1.4, speed: 2.6, passive: true, neutral: true, damage: 6, drops: [['cod', 0, 2], ['salmon', 0, 2]], xp: 3 },
+  llama: { hp: 22, w: 0.9, h: 1.87, speed: 2.4, passive: true, neutral: true, ranged: 'spit', food: ['wheat', 'hay_block'], drops: [['leather', 0, 2]], xp: 2 },
+  // monsters
+  husk: { hp: 20, w: 0.6, h: 1.95, speed: 2.6, damage: 3, onHit: 'hunger', drops: [['rotten_flesh', 0, 2]], rare: [['iron_ingot', 0.025]], xp: 5 },
+  drowned: { hp: 20, w: 0.6, h: 1.95, speed: 2.4, damage: 3, amphibious: true, drops: [['rotten_flesh', 0, 2]], rare: [['copper_ingot', 0.1], ['fishing_rod', 0.03]], xp: 5, burns: true },
+  stray: { hp: 20, w: 0.6, h: 1.99, speed: 2.6, damage: 3, ranged: 'arrow', onShot: 'slowness', drops: [['bone', 0, 2], ['arrow', 0, 2]], xp: 5, burns: true },
+  cave_spider: { hp: 12, w: 0.7, h: 0.5, speed: 3.6, damage: 2, onHit: 'poison', drops: [['string', 0, 2]], rare: [['spider_eye', 0.3]], xp: 5, climbs: true, scale: 0.7, tint: 0x3a5a8a },
+  silverfish: { hp: 8, w: 0.4, h: 0.3, speed: 3.2, damage: 1, drops: [], xp: 5 },
+  magma_blob: { hp: 16, w: 2.04, h: 2.04, speed: 2.6, damage: 5, drops: [['magma_cream', 0, 1]], xp: 4, fireImmune: true, slimeLike: true },
+  night_wraith: { hp: 20, w: 0.9, h: 0.9, speed: 7, damage: 4, flier: true, swoops: true, drops: [['phantom_membrane', 0, 1]], xp: 5, burns: true },
+  bandit: { hp: 24, w: 0.6, h: 1.95, speed: 2.8, damage: 3, ranged: 'arrow', drops: [['arrow', 0, 2]], rare: [['emerald', 0.3]], xp: 5 },
+  brute: { hp: 24, w: 0.6, h: 1.95, speed: 3.2, damage: 8, drops: [], rare: [['emerald', 0.3], ['iron_axe', 0.08]], xp: 5 },
+  abyssal_eel: { hp: 30, w: 1, h: 0.8, speed: 4, damage: 4, aquatic: true, ranged: 'water_bolt', drops: [['prismarine_shard', 0, 2], ['cod', 0, 1]], xp: 10 },
+  purpur_sentinel: { hp: 30, w: 1, h: 1, speed: 0, damage: 0, ranged: 'levitation_bolt', stationary: true, drops: [['shulker_shell', 0, 1]], xp: 5 },
+  ash_goblin: { hp: 16, w: 0.6, h: 1.4, speed: 3, passive: true, neutral: true, damage: 5, barters: true, fireImmune: true, drops: [['gold_nugget', 0, 3]], xp: 5 },
+  hellboar: { hp: 40, w: 1.4, h: 1.4, speed: 3, damage: 6, knock: 2, food: ['crimson_fungus'], drops: [['porkchop', 2, 4], ['leather', 0, 1]], xp: 5, fireImmune: true },
+  lava_wader: { hp: 20, w: 0.9, h: 1.7, speed: 2.4, passive: true, lavaWalker: true, fireImmune: true, food: ['warped_fungus'], drops: [['string', 2, 5]], xp: 2 },
+  charred_skeleton: { hp: 20, w: 0.7, h: 2.4, speed: 3, damage: 8, onHit: 'wither', drops: [['coal', 0, 1], ['bone', 0, 2]], rare: [['wither_skeleton_skull', 0.04]], xp: 5, fireImmune: true },
+  ash_colossus: { hp: 300, w: 1.2, h: 3.2, speed: 4, flying: true, ranged: 'ash_skull', damage: 8, drops: [['nether_star', 1, 1]], xp: 50, boss: true, fireImmune: true },
 };
-const HOSTILE = new Set(['zombie', 'skeleton', 'creeper', 'spider', 'enderman', 'witch', 'slime', 'zombified_piglin', 'ghast', 'blaze', 'ender_dragon']);
+const HOSTILE = new Set(['husk', 'drowned', 'stray', 'cave_spider', 'silverfish', 'magma_blob', 'night_wraith', 'bandit', 'brute', 'abyssal_eel', 'purpur_sentinel', 'hellboar', 'charred_skeleton', 'ash_colossus', 'zombie_villager', 'zombie', 'skeleton', 'creeper', 'spider', 'enderman', 'witch', 'slime', 'zombified_piglin', 'ghast', 'blaze', 'ender_dragon']);
 
 export class Mob extends Entity {
   constructor(game, type, x, y, z, opts = {}) {
@@ -300,11 +353,11 @@ export class Mob extends Entity {
     this.type = type;
     const info = MOB_INFO[type];
     this.info = info;
-    this.size = opts.size ?? (type === 'slime' ? 2 : 1);
+    this.size = opts.size ?? (type === 'slime' || type === 'magma_blob' ? 2 : 1);
     this.baby = !!opts.baby;
-    const sc = this.baby ? 0.5 : type === 'slime' ? this.size / 2 : 1;
+    const sc = this.baby ? 0.5 : type === 'slime' || type === 'magma_blob' ? this.size / 2 : 1;
     this.w = info.w * sc; this.h = info.h * sc;
-    this.maxHealth = type === 'slime' ? this.size * this.size * 4 : info.hp;
+    this.maxHealth = type === 'slime' || type === 'magma_blob' ? this.size * this.size * 4 : info.hp;
     this.health = this.maxHealth;
     this.hostile = HOSTILE.has(type) && !info.neutral;
     this.angry = false;
@@ -320,8 +373,9 @@ export class Mob extends Entity {
     this.eggTimer = 60 + Math.random() * 120;
     this.stepHeight = 0.6;
     if (type === 'ender_dragon') this.stepHeight = 0;
-    const modelScale = type === 'ghast' ? 4 : type === 'ender_dragon' ? 1 : sc;
+    const modelScale = (type === 'ghast' ? 4 : type === 'ender_dragon' ? 1 : sc) * (info.scale ?? 1) * (type === 'magma_blob' ? this.size / 2 : 1);
     const { root, parts, mats } = buildModel(type, modelScale);
+    if (info.tint) for (const pv of Object.values(parts)) if (pv.userData.mesh) pv.userData.mesh.userData.tint = info.tint;
     this.model = root; this.parts = parts; this.mats = mats;
     this.mesh.add(root);
     if (type === 'sheep' && this.woolColor !== 'white') this.setWool(this.woolColor);
@@ -364,7 +418,22 @@ export class Mob extends Entity {
       if (this.info.neutral || this.hostile) { this.angry = true; this.target = this.game.player; }
       if (this.type === 'zombified_piglin') for (const e of this.game.entities) if (e instanceof Mob && e.type === 'zombified_piglin' && e.pos.distanceTo(this.pos) < 24) { e.angry = true; e.target = this.game.player; }
       this.game.player.lastHurtMob = this;
+      if (this.type === 'villager') {
+        this.rep = (this.rep ?? 0) - 10;
+        for (const e of this.game.entities) if (e instanceof Mob && !e.dead && e.pos.distanceTo(this.pos) < 24) {
+          if (e.type === 'iron_golem') { e.angry = true; e.target = this.game.player; }
+          if (e.type === 'villager' && e !== this) e.rep = (e.rep ?? 0) - 3;
+        }
+        this.panic = 5;
+      }
     } else if (source instanceof Mob) { this.target = source; this.angry = true; }
+    // zombies turn the villagers they kill into zombie villagers
+    if (this.type === 'villager' && this.health <= 0 && source instanceof Mob && (source.type === 'zombie' || source.type === 'zombie_villager') && Math.random() < (this.game.difficulty === 'hard' ? 1 : this.game.difficulty === 'normal' ? 0.5 : 0)) {
+      this.remove = true; this.dead = true;
+      const z = this.game.spawnMob('zombie_villager', this.pos.x, this.pos.y, this.pos.z);
+      if (z) z.villagerData = this.villagerSnapshot();
+      return true;
+    }
     if (this.type === 'enderman' && Math.random() < 0.7) this.teleport();
     if (this.health <= 0) this.die(source);
     return true;
@@ -375,7 +444,7 @@ export class Mob extends Entity {
     if (this.baby) return;
     const fire = this.fire > 0;
     for (const [name, a, b] of this.info.drops) {
-      let n = a + Math.floor(Math.random() * (b - a + 1));
+      let n = a + Math.floor(Math.random() * (b - a + 1 + (this.looting ?? 0)));
       let id = I[name];
       if (fire && I['cooked_' + name]) id = I['cooked_' + name];
       if (name === 'beef' && fire) id = I.cooked_beef;
@@ -386,6 +455,155 @@ export class Mob extends Entity {
     if (this.type === 'slime' && this.size > 1) for (let i = 0; i < 2 + ((Math.random() * 2) | 0); i++) this.game.spawnMob('slime', this.pos.x + (Math.random() - 0.5), this.pos.y + 0.5, this.pos.z + (Math.random() - 0.5), { size: this.size / 2 });
     if (this.lastAttackedByPlayer || source === this.game.player) this.game.spawnXP(this.pos.x, this.pos.y + 0.5, this.pos.z, this.info.xp);
     if (this.type === 'ender_dragon') this.game.onDragonDeath(this);
+  }
+  makeNameLabel() {
+    const c = document.createElement('canvas'); c.width = 256; c.height = 40;
+    const g = c.getContext('2d');
+    g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(0, 0, 256, 40);
+    g.fillStyle = '#fff'; g.font = 'bold 26px monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(this.customName.slice(0, 18), 128, 21);
+    const tex = new THREE.CanvasTexture(c);
+    this.nameLabel = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+    this.nameLabel.scale.set(1.6, 0.25, 1);
+    this.nameLabel.position.y = this.h + 0.45;
+    this.mesh.add(this.nameLabel);
+  }
+  villagerSnapshot() { return { profession: this.profession, vlevel: this.vlevel, vxp: this.vxp, offers: this.offers, rep: this.rep, home: this.home }; }
+  villagerTick(dt) {
+    const g = this.game, w = this.world;
+    this.jobTimer = (this.jobTimer ?? Math.random() * 3) - dt;
+    if (this.jobTimer <= 0) {
+      this.jobTimer = 3;
+      // lose the job if the work station is gone (only while still a novice without trades used)
+      if (this.jobPos && !JOB_BLOCK[BLOCKS[w.getBlock(...this.jobPos)]?.name] && w.isLoaded(this.jobPos[0], this.jobPos[2])) {
+        g.jobClaims?.delete(this.jobPos.join(','));
+        this.jobPos = null;
+        if (this.vlevel === 1 && this.vxp === 0) { this.profession = null; this.offers = []; this.applyRobe(); }
+      }
+      if (!this.profession && !this.nitwit) {
+        const x0 = Math.floor(this.pos.x), y0 = Math.floor(this.pos.y), z0 = Math.floor(this.pos.z);
+        outer: for (let dx = -10; dx <= 10; dx++) for (let dz = -10; dz <= 10; dz++) for (let dy = -2; dy <= 3; dy++) {
+          const id = w.getBlock(x0 + dx, y0 + dy, z0 + dz);
+          const prof = JOB_BLOCK[BLOCKS[id]?.name];
+          if (!prof) continue;
+          const key = `${x0 + dx},${y0 + dy},${z0 + dz}`;
+          if (g.jobClaims?.has(key) && g.jobClaims.get(key) !== this.id) continue;
+          (g.jobClaims ??= new Map()).set(key, this.id);
+          this.jobPos = [x0 + dx, y0 + dy, z0 + dz];
+          initVillager(this, prof);
+          this.applyRobe();
+          g.particles?.burst(this.pos.x, this.pos.y + 2, this.pos.z, 0x60ff60);
+          break outer;
+        }
+      }
+      // restock twice a day near the job site
+      const day = Math.floor((g.time + 6000) / 12000);
+      if (this.profession && this.lastRestock !== day && this.jobPos && this.pos.distanceTo(new THREE.Vector3(...this.jobPos)) < 6) { this.lastRestock = day; restock(this); }
+    }
+    if (this.leveledUp > 0) { this.leveledUp -= dt; if (Math.random() < dt * 8) g.particles?.burst(this.pos.x, this.pos.y + 2.2, this.pos.z, 0x40ff40); }
+    // wander toward the job site during work hours
+    const tday = g.time % 24000;
+    if (this.jobPos && tday > 2000 && tday < 9000 && !this.wanderTarget && Math.random() < dt * 0.3) this.wanderTarget = new THREE.Vector3(this.jobPos[0] + 0.5, this.pos.y, this.jobPos[2] + 0.5);
+  }
+  applyRobe() {
+    const prof = PROFESSIONS[this.profession];
+    const set = (n, col) => { const m = this.parts[n]?.userData.mesh; if (m) m.userData.tint = col; };
+    if (prof) { set('body', prof.robe); set('robe', prof.robe); set('hood', prof.hat); set('arms', prof.robe); }
+    else { for (const n of ['body', 'robe', 'hood', 'arms']) { const m = this.parts[n]?.userData.mesh; if (m) delete m.userData.tint; } }
+  }
+  // swimming creatures stay in water; out of it they flop and eventually suffocate
+  aquaticAI(dt, p) {
+    const w = this.world;
+    const inW = this.inWater || w.getBlock(Math.floor(this.pos.x), Math.floor(this.pos.y + 0.2), Math.floor(this.pos.z)) === B.water;
+    if (!inW) {
+      this.dry = (this.dry ?? 0) + dt;
+      if (this.onGround && Math.random() < dt * 3) { this.vel.y = 5; this.vel.x = (Math.random() - 0.5) * 3; this.vel.z = (Math.random() - 0.5) * 3; }
+      if (this.dry > 15 && Math.random() < dt) this.hurt(1, null);
+      this.physics(dt);
+    } else {
+      this.dry = 0;
+      let goal = this.swimTarget;
+      const hostile = this.hostile || this.angry;
+      if (hostile && p.mode === 'survival' && !p.dead && p.pos.distanceTo(this.pos) < 16) {
+        goal = p.pos.clone().add(new THREE.Vector3(0, 1, 0));
+        if (this.info.ranged && this.attackCooldown <= 0 && this.canSee(p)) { this.shoot(p, this.info.ranged); this.attackCooldown = 3; }
+        else if (!this.info.ranged && this.pos.distanceTo(goal) < 1.5 && this.attackCooldown <= 0) { p.hurt(this.info.damage ?? 2, this); this.attackCooldown = 1; }
+      } else if (this.panic > 0 && p.pos.distanceTo(this.pos) < 10) { this.panic -= dt; goal = this.pos.clone().add(this.pos.clone().sub(p.pos).normalize().multiplyScalar(6)); }
+      if (!goal || this.pos.distanceTo(goal) < 1 || Math.random() < dt * 0.15) {
+        goal = this.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 4, (Math.random() - 0.5) * 12));
+        if (w.getBlock(Math.floor(goal.x), Math.floor(goal.y), Math.floor(goal.z)) !== B.water) goal = null;
+        this.swimTarget = goal;
+      }
+      if (goal) {
+        const d = goal.clone().sub(this.pos); const len = d.length();
+        if (len > 0.1) { d.multiplyScalar(this.info.speed / len); this.vel.lerp(d, Math.min(1, dt * 2)); this.yaw = Math.atan2(this.vel.x, this.vel.z); }
+      } else this.vel.multiplyScalar(Math.pow(0.3, dt));
+      // stay below the surface
+      if (w.getBlock(Math.floor(this.pos.x), Math.floor(this.pos.y + this.h + 0.2), Math.floor(this.pos.z)) !== B.water && this.vel.y > 0) this.vel.y = this.type === 'dolphin' && Math.random() < 0.01 ? 8 : -0.5;
+      moveEntity(this, w, this.vel.x * dt, this.vel.y * dt, this.vel.z * dt, 0);
+    }
+    for (const [n, pv] of Object.entries(this.parts)) {
+      if (n.startsWith('tent')) pv.rotation.x = Math.sin(this.age * 3 + Number(n.slice(4))) * 0.4;
+      if (n === 'tail') pv.rotation.y = Math.sin(this.age * 10) * 0.4;
+      if (n.startsWith('seg')) pv.position.x = Math.sin(this.age * 6 - Number(n.slice(3))) * 0.08 * Number(n.slice(3));
+    }
+    this.animateCommon();
+  }
+  // floating sentinel: turns its shell toward the player and fires levitation bolts
+  sentinelAI(dt, p) {
+    const d = p.pos.distanceTo(this.pos);
+    const open = p.mode === 'survival' && d < 16 && this.canSee(p);
+    this.parts.ring && (this.parts.ring.rotation.y += dt * (open ? 3 : 0.5));
+    if (this.parts.core) this.parts.core.position.y = (open ? 8 : 6) / 16 + Math.sin(this.age * 2) * 0.03;
+    if (open && this.attackCooldown <= 0) { this.shoot(p, 'levitation_bolt'); this.attackCooldown = 2 + Math.random() * 2; }
+    if (this.hurtTime > 0.45 && Math.random() < 0.3) this.teleport();
+    this.vel.set(0, 0, 0);
+    this.animateCommon();
+  }
+  // gentle wandering flight for birds and insects
+  passiveFly(dt) {
+    if (!this.flyGoal || this.pos.distanceTo(this.flyGoal) < 1 || Math.random() < dt * 0.2) {
+      const surf = this.world.surfaceY(Math.floor(this.pos.x), Math.floor(this.pos.z));
+      this.flyGoal = new THREE.Vector3(this.pos.x + (Math.random() - 0.5) * 12, Math.max(surf + 1.5, this.pos.y + (Math.random() - 0.5) * 4), this.pos.z + (Math.random() - 0.5) * 12);
+      if (Math.random() < 0.3 && this.tamed && this.owner) this.flyGoal = this.owner.pos.clone().add(new THREE.Vector3(0, 2.2, 0));
+    }
+    const d = this.flyGoal.clone().sub(this.pos); const len = d.length();
+    if (len > 0.1) d.multiplyScalar(Math.min(this.info.speed, len * 2) / len);
+    this.vel.lerp(d, Math.min(1, dt * 2));
+    moveEntity(this, this.world, this.vel.x * dt, this.vel.y * dt, this.vel.z * dt, 0);
+    if (this.collidedH) this.flyGoal = null;
+    this.yaw = Math.atan2(this.vel.x, this.vel.z);
+    const flap = Math.sin(this.age * 30) * 0.8;
+    if (this.parts.wing0) { this.parts.wing0.rotation.z = flap; this.parts.wing1.rotation.z = -flap; }
+    this.animateCommon();
+    return true;
+  }
+  // night wraith: circles high above, then swoops down on its target
+  wraithAI(dt, tgt) {
+    this.swoopT = (this.swoopT ?? 4) - dt;
+    let goal;
+    if (this.swoopT > 0) { const a = this.age * 0.8; goal = tgt.pos.clone().add(new THREE.Vector3(Math.cos(a) * 10, 12, Math.sin(a) * 10)); }
+    else { goal = tgt.pos.clone().add(new THREE.Vector3(0, 1, 0)); if (this.pos.distanceTo(goal) < 1.5) { if (this.attackCooldown <= 0) { tgt.hurt(this.info.damage, this); this.attackCooldown = 1; } this.swoopT = 5 + Math.random() * 4; } }
+    const d = goal.sub(this.pos).normalize().multiplyScalar(this.swoopT > 0 ? 6 : 11);
+    this.vel.lerp(d, Math.min(1, dt * 2));
+    moveEntity(this, this.world, this.vel.x * dt, this.vel.y * dt, this.vel.z * dt, 0);
+    this.yaw = Math.atan2(this.vel.x, this.vel.z);
+    const flap = Math.sin(this.age * 6) * 0.5;
+    if (this.parts.wing0) { this.parts.wing0.rotation.z = flap; this.parts.wing1.rotation.z = -flap; }
+    this.animateCommon();
+  }
+  applyPotion(effects) {
+    const undead = ['zombie', 'skeleton', 'zombified_piglin', 'husk', 'drowned', 'stray', 'wither_skeleton', 'phantom', 'wither', 'zoglin'].includes(this.type);
+    for (const ef of effects) {
+      let e = ef.e;
+      if (undead && e === 'instant_health') e = 'instant_damage'; else if (undead && e === 'instant_damage') e = 'instant_health';
+      if (e === 'instant_health') this.health = Math.min(this.maxHealth, this.health + (4 << ef.a));
+      else if (e === 'instant_damage') { this.hurtTime = 0; this.hurt(6 << ef.a, null); }
+      else if (e === 'poison' && !undead) this.poison = Math.max(this.poison ?? 0, ef.t);
+      else if (e === 'slowness') this.slowFor = Math.max(this.slowFor ?? 0, ef.t);
+      else if (e === 'weakness') this.weakFor = Math.max(this.weakFor ?? 0, ef.t);
+      else if (e === 'speed') this.fastFor = Math.max(this.fastFor ?? 0, ef.t);
+    }
   }
   teleport() {
     for (let i = 0; i < 16; i++) {
@@ -412,6 +630,9 @@ export class Mob extends Entity {
       return;
     }
     if (this.attackCooldown > 0) this.attackCooldown -= dt;
+    if (this.poison > 0) { this.poison -= dt; this.poisonAcc = (this.poisonAcc ?? 0) + dt; if (this.poisonAcc > 1.25 && this.health > 1) { this.poisonAcc = 0; this.hurtTime = 0; this.hurt(1, null); } }
+    if (this.slowFor > 0) this.slowFor -= dt;
+    if (this.fastFor > 0) this.fastFor -= dt;
     if (this.growTimer > 0) { this.growTimer -= dt; if (this.growTimer <= 0 && this.baby) this.growUp(); }
     if (this.love > 0) this.love -= dt;
     if (this.breedCooldown > 0) this.breedCooldown -= dt;
@@ -424,13 +645,54 @@ export class Mob extends Entity {
     }
     if (this.pos.y < -40) { this.health = 0; this.die(null); return; }
     if (this.type === 'enderman' && this.inWater) this.teleport();
+    if (this.type === 'villager') this.villagerTick(dt);
+    if (this.info.barters && !this.angry) {
+      if (this.bartering > 0) { this.bartering -= dt; if (this.bartering <= 0) { const loot = [['ender_pearl', 1, 2], ['string', 3, 9], ['fire_charge_dummy', 1, 1], ['obsidian', 1, 1], ['crying_obsidian', 1, 3], ['gravel', 8, 16], ['leather', 2, 4], ['nether_brick', 2, 8], ['soul_sand', 2, 8], ['quartz', 5, 12], ['glowstone_dust', 5, 12], ['magma_cream', 2, 6], ['potion', 1, 1]]; const [n, a, b2] = loot[Math.floor(Math.random() * loot.length)]; if (I[n] != null) this.game.spawnItem(this.pos.x, this.pos.y + 1, this.pos.z, { id: I[n], count: a + Math.floor(Math.random() * (b2 - a + 1)), dmg: 0, data: n === 'potion' ? { potion: 'fire_resistance' } : undefined }); this.game.sfx('trade'); } }
+      else for (const e of this.game.entities) if (e.stack && !e.remove && e.stack.id === I.gold_ingot && e.pos.distanceTo(this.pos) < 2) { e.stack.count--; if (e.stack.count <= 0) e.remove = true; this.bartering = 3; break; }
+    }
+    if (this.type === 'zombie_villager' && this.curing > 0) {
+      this.curing -= dt;
+      if (Math.random() < dt * 6) this.game.particles?.burst(this.pos.x, this.pos.y + 1.5, this.pos.z, 0xff60a0);
+      if (this.curing <= 0) {
+        this.remove = true; this.dead = true;
+        const v = this.game.spawnMob('villager', this.pos.x, this.pos.y, this.pos.z);
+        if (v && this.villagerData) Object.assign(v, this.villagerData);
+        if (v) { v.rep = (v.rep ?? 0) + 50; v.applyRobe(); }
+        this.game.sfx('levelup'); this.game.achieve('Doctor zombi');
+        return;
+      }
+    }
     // AI
-    let moveDir = null, speed = this.info.speed, wantJump = false;
+    let moveDir = null, speed = this.info.speed * (this.slowFor > 0 ? 0.6 : 1) * (this.fastFor > 0 ? 1.4 : 1), wantJump = false;
     const toPlayer = p.pos.clone().sub(this.pos);
     const distP = toPlayer.length();
     const playerTargetable = p.mode === 'survival' && !p.dead;
 
     if (this.type === 'ender_dragon') return this.dragonAI(dt, p);
+    if (this.info.aquatic) return this.aquaticAI(dt, p);
+    if (this.info.stationary) return this.sentinelAI(dt, p);
+    if (this.info.flier && !this.target && !(this.angry && this.hostile)) { if (this.passiveFly(dt)) return; }
+    if (this.type === 'creeper') { const cat = this.game.entities.find((e) => e.type === 'cat' && !e.dead && e.pos.distanceTo(this.pos) < 6); if (cat) { const away = this.pos.clone().sub(cat.pos).setY(0).normalize(); this.vel.x = away.x * 4; this.vel.z = away.z * 4; this.fuse = 0; this.target = null; } }
+    if (this.type === 'night_wraith' && this.target) return this.wraithAI(dt, this.target);
+    if (this.info.lavaWalker) { const below = this.world.getBlock(Math.floor(this.pos.x), Math.floor(this.pos.y - 0.1), Math.floor(this.pos.z)); if (below === B.lava || this.inLava) { this.vel.y = Math.max(this.vel.y, 0); this.pos.y = Math.max(this.pos.y, Math.floor(this.pos.y - 0.1) + 1); this.onGround = true; } }
+    if (p.vehicle === this) {
+      // ridden: horses follow the rider's input, pigs follow a carrot on a stick
+      const inp = this.game.input();
+      const ctrl = this.type === 'horse' ? this.tamed && this.saddled : this.type === 'pig' && p.heldItem() && ITEMS[p.heldItem().id].name === 'carrot_on_a_stick';
+      if (ctrl) {
+        this.yaw = p.yaw + Math.PI;
+        let f = (inp.forward ? 1 : 0) - (inp.back ? 0.4 : 0);
+        if (inp.analog) f = Math.max(-0.4, Math.min(1, -(inp.az ?? 0)));
+        const sp = this.type === 'horse' ? 9 : 3;
+        const dx = -Math.sin(p.yaw) * f * sp, dz = -Math.cos(p.yaw) * f * sp;
+        this.vel.x += (dx - this.vel.x) * Math.min(1, dt * 6); this.vel.z += (dz - this.vel.z) * Math.min(1, dt * 6);
+        if (inp.jump && this.onGround && this.type === 'horse') this.vel.y = 11;
+        if (this.collidedH && this.onGround) this.vel.y = 8.4;
+      }
+      this.physics(dt);
+      this.animate(dt, Math.hypot(this.vel.x, this.vel.z));
+      return;
+    }
 
     if (this.hostile || this.angry) {
       if (!this.target || this.target.dead || this.target.remove) this.target = null;
@@ -471,11 +733,16 @@ export class Mob extends Entity {
       } else {
         moveDir = to.clone().setY(0).normalize();
         if (this.type === 'spider' && d < 4 && d > 2 && this.onGround) { this.vel.y = 7; this.vel.x += moveDir.x * 3; this.vel.z += moveDir.z * 3; }
-        if (this.type === 'slime') { if (this.onGround) { if (this.attackCooldown <= 0) { this.vel.y = 8; this.vel.x = moveDir.x * 4; this.vel.z = moveDir.z * 4; this.attackCooldown = 1.2; } moveDir = null; } }
+        if (this.info.hops && this.onGround && Math.random() < dt * 3) { this.vel.y = 6; }
+        if (this.type === 'slime' || this.info.slimeLike) { if (this.onGround) { if (this.attackCooldown <= 0) { this.vel.y = 8; this.vel.x = moveDir.x * 4; this.vel.z = moveDir.z * 4; this.attackCooldown = 1.2; } moveDir = null; } }
         const reach = this.w / 2 + tgt.w / 2 + 0.6;
         if (Math.hypot(to.x, to.z) < reach && Math.abs(to.y) < 2 && this.attackCooldown <= 0) {
           const dmg = (this.info.damage ?? 2) * (this.game.difficultyMul ?? 1);
-          tgt.hurt(this.type === 'slime' ? this.size * 1.5 : dmg, this, to.clone().normalize());
+          tgt.hurt(this.info.slimeLike || this.type === 'slime' ? this.size * 1.5 : dmg, this, to.clone().normalize());
+          const oh = this.info.onHit;
+          if (oh && tgt.addEffect) { if (oh === 'poison') tgt.addEffect('poison', this.game.difficulty === 'hard' ? 15 : 7, 0); if (oh === 'wither') tgt.addEffect('wither', 10, 0); if (oh === 'hunger') tgt.addEffect('hunger', 7, 0); }
+          if (this.info.knock) tgt.vel.y += 6 * this.info.knock;
+          if (this.type === 'bee') { this.angry = false; this.target = null; this.stung = true; this.health = Math.min(this.health, 2); }
           this.attackCooldown = 1;
           if (this.type === 'iron_golem') tgt.vel.y += 8;
         }
@@ -517,6 +784,7 @@ export class Mob extends Entity {
       this.vel.x += (moveDir.x * speed - this.vel.x) * Math.min(1, dt * 10 * accel);
       this.vel.z += (moveDir.z * speed - this.vel.z) * Math.min(1, dt * 10 * accel);
       if (this.collidedH && this.onGround) wantJump = true;
+      if (this.info.hops && this.onGround) this.vel.y = Math.max(this.vel.y, 5);
       if (this.collidedH && this.info.climbs) this.vel.y = 3;
       if (this.inWater) this.vel.y = Math.max(this.vel.y, 2.5);
       // avoid cliffs when wandering
@@ -565,7 +833,8 @@ export class Mob extends Entity {
     const to = tgt.pos.clone().add(new THREE.Vector3(0, tgt.h * 0.6, 0));
     const d = to.sub(from);
     const dist = d.length();
-    const speed = kind === 'arrow' ? 32 : kind === 'fireball' ? 14 : kind === 'small_fireball' ? 18 : 14;
+    if (kind === 'ash_skull' || kind === 'levitation_bolt' || kind === 'water_bolt' || kind === 'spit') this.game.sfx(kind === 'spit' ? 'throw' : 'fireball');
+    const speed = kind === 'levitation_bolt' ? 8 : kind === 'water_bolt' ? 20 : kind === 'spit' ? 18 : kind === 'ash_skull' ? 16 : kind === 'arrow' ? 32 : kind === 'fireball' ? 14 : kind === 'small_fireball' ? 18 : 14;
     if (kind === 'arrow' || kind === 'potion') d.y += dist * 0.12;
     d.normalize();
     if (kind === 'arrow') d.add(new THREE.Vector3((Math.random() - 0.5) * 0.06, 0, (Math.random() - 0.5) * 0.06)).normalize();
@@ -574,6 +843,7 @@ export class Mob extends Entity {
     for (let i = 0; i < shots; i++) {
       const v = d.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.1 * i, 0, (Math.random() - 0.5) * 0.1 * i)).normalize().multiplyScalar(speed);
       const pr = new Projectile(this.game, kind, from.clone(), v, this);
+      if (kind === 'potion') pr.potion = ['harming', 'poison', 'slowness', 'weakness'][Math.floor(Math.random() * 4)];
       this.game.addEntity(pr);
     }
     this.game.sfx(kind === 'arrow' ? 'bow' : 'fireball');
@@ -689,12 +959,14 @@ export class Mob extends Entity {
     if (this.type === 'creeper' && this.fuse > 0 && Math.floor(this.fuse * 8) % 2) { r = g = b = 1.5; }
     if (this.type === 'blaze' || this.type === 'ghast' && this.attackCooldown > 2.5) { r = g = b = Math.max(l, 0.9); }
     for (const m of this.mats) m.color.setRGB(r, g, b);
-    const body = this.parts.body?.userData.mesh;
-    if (body?.userData.tint) {
-      const c = new THREE.Color(body.userData.tint);
-      const mats = Array.isArray(body.material) ? body.material : [body.material];
+    for (const pv of Object.values(this.parts)) {
+      const mesh = pv.userData.mesh;
+      if (!mesh?.userData.tint) continue;
+      const c = new THREE.Color(mesh.userData.tint);
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       for (const m of mats) m.color.setRGB(c.r * r, c.g * g, c.b * b);
     }
+    if (this.customName && !this.nameLabel) this.makeNameLabel();
     this.model.rotation.y = this.yaw;
   }
 }
@@ -721,7 +993,14 @@ export class XPOrb extends Entity {
       this.vel.addScaledVector(to.normalize(), dt * 40 * (1 - d / 8) + dt * 6);
       this.vel.multiplyScalar(0.9);
       this.pos.addScaledVector(this.vel, dt);
-      if (d < 0.7) { this.remove = true; if (p.mode === 'survival') p.addXP(this.value); this.game.sfx('xp'); }
+      if (d < 0.7) {
+        this.remove = true;
+        let xp = this.value;
+        const mend = [p.heldItem(), ...p.armor].filter((s) => s && s.dmg > 0 && s.data?.ench?.mending);
+        if (mend.length) { const s = mend[Math.floor(Math.random() * mend.length)]; const fix = Math.min(s.dmg, xp * 2); s.dmg -= fix; xp -= Math.ceil(fix / 2); }
+        if (p.mode === 'survival' && xp > 0) p.addXP(xp);
+        this.game.sfx('xp');
+      }
     } else this.physics(dt, 16, 0.9);
     const k = 0.75 + Math.sin(this.age * 6) * 0.25;
     this.inner.material.color.setRGB(0.6 + 0.4 * k, 1, 0.25 * k);

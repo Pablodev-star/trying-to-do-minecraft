@@ -1,6 +1,6 @@
 // Chunk storage, lighting, meshing, fluids and random ticks.
 import * as THREE from '../lib/three.module.min.js';
-import { BLOCKS, B } from './registry.js';
+import { BLOCKS, B, BLOCK_LIMIT } from './registry.js';
 import { Generator, CS, CH, SEA, idx, biomeColors } from './worldgen.js';
 import { atlasCanvas, tileUV, hex } from './textures.js';
 import { mulberry32 } from './noise.js';
@@ -42,7 +42,7 @@ export const opaqueMaterial = new THREE.ShaderMaterial({ uniforms: worldUniforms
 export const translucentMaterial = new THREE.ShaderMaterial({ uniforms: worldUniforms, vertexShader: trn.vert, fragmentShader: trn.frag, transparent: true, depthWrite: false, side: THREE.DoubleSide });
 
 // ---------------------------------------------------------------- block flags tables (fast lookup)
-const OPAQUE = new Uint8Array(256), SOLID = new Uint8Array(256), EMIT = new Uint8Array(256), ATTEN = new Uint8Array(256);
+const OPAQUE = new Uint8Array(BLOCK_LIMIT), SOLID = new Uint8Array(BLOCK_LIMIT), EMIT = new Uint8Array(BLOCK_LIMIT), ATTEN = new Uint8Array(BLOCK_LIMIT);
 for (const b of BLOCKS) {
   OPAQUE[b.id] = b.opaque ? 1 : 0;
   SOLID[b.id] = b.solid ? 1 : 0;
@@ -64,10 +64,22 @@ const FACES = [
 // facing meta -> face index of the front: 0 south(+z) 1 west(-x) 2 north(-z) 3 east(+x)
 const FRONT_FACE = [4, 1, 5, 0];
 const AO_CURVE = [0.45, 0.62, 0.8, 1.0];
+let UVROT = 0;
+const WHITE = [1, 1, 1];
+const wireTint = [1, 0, 0];
 
+// facing6 meta -> face index of the front (0 +x, 1 -x, 2 +y, 3 -y, 4 +z, 5 -z)
+const FRONT6 = [3, 2, 5, 4, 1, 0];
+const OPP = [1, 0, 3, 2, 5, 4];
 function texFor(b, faceIdx, meta) {
   const t = b.tex;
   if (typeof t === 'string') return t;
+  if (b.facing6) {
+    const front = FRONT6[meta & 7];
+    if (faceIdx === front) return t.front;
+    if (faceIdx === OPP[front]) return t.back ?? t.bottom;
+    return t.side;
+  }
   const f = FACES[faceIdx];
   if (f.side === 'top') return t.top;
   if (f.side === 'bottom') return t.bottom;
@@ -116,10 +128,11 @@ export class World {
     const g = this.gen.generate(cx, cz);
     let meta = g.meta ?? null;
     const sv = this.saved[k];
-    if (sv) { g.data.set(rleDecode(sv.d, g.data.length)); meta = rleDecode(sv.m, g.data.length); }
+    if (sv) { g.data.set(rleDecode(sv.d, g.data.length)); meta = rleDecode(sv.m, g.data.length, Uint8Array); }
     c = new Chunk(cx, cz, g.data, g.biomes, meta);
     if (sv) c.modified = true;
     this.chunks.set(k, c);
+    this.game?.redstone?.scanChunk(c, CS);
     for (let i = 0; i < g.data.length; i++) if (g.data[i] === B.spawner) this.spawners.add(`${(i & 15) + cx * CS},${i >> 8},${((i >> 4) & 15) + cz * CS}`);
     // neighbours need relight/remesh for borders
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
@@ -195,6 +208,7 @@ export class World {
         if (te.items && this.game?.dropTileItems) this.game.dropTileItems(x, y, z, te.items);
       }
     }
+    if (!opts.redstone && this.game?.redstone) this.game.redstone.onBlockChanged(x, y, z, old, id);
     if (!opts.noUpdate) this.neighborUpdate(x, y, z);
     return true;
   }
@@ -207,10 +221,10 @@ export class World {
       const b = BLOCKS[id];
       if (b.gravity) { const below = this.getBlock(nx, ny - 1, nz); if (!SOLID[below] && below !== B.water && below !== B.lava || BLOCKS[below].replaceable && below !== B.water && below !== B.lava) this.game?.spawnFallingBlock(nx, ny, nz, id); }
       // plants need support
-      if ((b.render === 'cross' || id === B.torch || id === B.soul_torch || id === B.snow || id === B.ladder) && id !== B.cobweb && id !== B.fire) {
+      if ((b.render === 'cross' || b.shape === 'torch' || b.shape === 'rail' || b.shape === 'wire' || b.shape === 'plate' || id === B.repeater || id === B.powered_repeater || id === B.comparator || id === B.snow || id === B.ladder) && id !== B.cobweb && id !== B.fire) {
         const below = this.getBlock(nx, ny - 1, nz);
         let ok = SOLID[below] || below === B.farmland || below === B.farmland_wet;
-        if ((id === B.torch || id === B.soul_torch) && this.getMeta(nx, ny, nz)) {
+        if (b.shape === 'torch' && this.getMeta(nx, ny, nz)) {
           const m = this.getMeta(nx, ny, nz);
           const [ax, az] = [[0, 1], [-1, 0], [0, -1], [1, 0]][m - 1];
           ok = SOLID[this.getBlock(nx + ax, ny, nz + az)];
@@ -334,6 +348,8 @@ export class World {
         const nx = x + ((this.rng() * 3) | 0) - 1, ny = y + ((this.rng() * 5) | 0) - 3, nz = z + ((this.rng() * 3) | 0) - 1;
         if (this.getBlock(nx, ny, nz) === B.dirt && !OPAQUE[this.getBlock(nx, ny + 1, nz)]) this.setBlock(nx, ny, nz, B.grass_block);
       }
+    } else if (id >= B.nether_wart_0 && id < B.nether_wart_3) {
+      if (this.getBlock(x, y - 1, z) === B.soul_sand && this.rng() < 0.15) this.setBlock(x, y, z, id + 1);
     } else if (id >= B.wheat_0 && id <= B.potatoes_7) {
       const stage = (id - B.wheat_0) % 8;
       const below = this.getBlock(x, y - 1, z);
@@ -472,7 +488,7 @@ export class World {
   // ---------------------------------------------------------------- meshing
   buildMesh(c) {
     // padded copies
-    const P = new Uint8Array(PW * PW * CH), PL = new Uint8Array(PW * PW * CH), PM = new Uint8Array(PW * PW * CH);
+    const P = new Uint16Array(PW * PW * CH), PL = new Uint8Array(PW * PW * CH), PM = new Uint8Array(PW * PW * CH);
     const pidx = (x, y, z) => (x + 1) + (z + 1) * PW + y * PW * PW;
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
       const n = (dx || dz) ? this.getChunk(c.cx + dx, c.cz + dz) : c;
@@ -493,6 +509,8 @@ export class World {
       if (kind === 'water') return hexRGB(bc.water);
       if (kind === 'grass' || kind === 'grass_top') return hexRGB(bc.grass);
       if (kind === 'foliage_spruce') return [0.38, 0.6, 0.38];
+      if (kind === 'foliage_dark_oak') return [0.33, 0.55, 0.2];
+      if (kind === 'foliage_mangrove') return [0.55, 0.69, 0.15];
       if (kind === 'foliage_birch') return [0.5, 0.65, 0.33];
       if (kind && kind.startsWith('foliage')) return hexRGB(bc.foliage);
       return [1, 1, 1];
@@ -550,9 +568,14 @@ export class World {
             if (OPAQUE[nid] || (nid === id && (b.render === 'portal' || b.shape === 'pane'))) continue;
           }
           let tex = texFor(b, f, meta);
-          if (b.shape === 'door') tex = meta & 4 ? 'door_top' : 'door_bottom';
+          if (b.shape === 'door') tex = b.name === 'iron_door' ? (meta & 4 ? 'iron_door_top' : 'iron_door_bottom') : (meta & 4 ? 'door_top' : 'door_bottom');
+          if (b.shape === 'rail') { const rm = b.name === 'rail' ? meta : meta & 7; if (rm >= 6) { tex = 'rail_corner'; UVROT = [3, 0, 1, 2][rm - 6]; } else UVROT = rm === 1 || rm === 2 || rm === 3 ? 1 : 0; }
+          if (b.shape === 'wire') { const p = meta & 15; wireTint[0] = 0.32 + 0.68 * p / 15; wireTint[1] = 0.02 + 0.1 * (p / 15) ** 3; wireTint[2] = 0.02; }
+          if (b.shape !== 'rail') UVROT = b.topRot && F.side === 'top' ? meta & 3 : 0;
+          else if (F.side !== 'top') UVROT = 0;
           if (b.shape === 'bed' && F.side === 'top') tex = meta & 4 ? 'bed_top' : 'bed_foot';
-          emitFace(buf, F, x, y, z, tex, tint, getP, getL, box, !!b.shape && b.shape !== 'slab' && b.shape !== 'stairs' ? true : b.shape ? false : true, b.render === 'portal', b.render === 'portal' ? 5 : 0);
+          emitFace(buf, F, x, y, z, tex, b.shape === 'wire' ? wireTint : tint, getP, getL, box, !!b.shape && b.shape !== 'slab' && b.shape !== 'stairs' ? true : b.shape ? false : true, b.render === 'portal', b.render === 'portal' ? 5 : 0);
+          UVROT = 0;
         }
       }
     }
@@ -675,8 +698,9 @@ function emitFace(buf, F, x, y, z, tex, tint, getP, getL, box, noAO = false, fla
   const [x0, y0, z0, x1, y1, z1] = box;
   const n = F.n;
   const base = buf.pos.length / 3;
-  const ao = [];
-  const lights = [];
+  const ax0 = F.ax0 ?? (F.ax0 = [0, 1, 2].filter((a) => n[a] === 0)[0]), ax1 = F.ax1 ?? (F.ax1 = [0, 1, 2].filter((a) => n[a] === 0)[1]);
+  const t = tint ?? WHITE;
+  let ao0 = 0, ao1 = 0, ao2 = 0, ao3 = 0;
   // light from the cell in front of the face (or own cell when inset)
   const inset = (n[0] === 1 && x1 < 1) || (n[0] === -1 && x0 > 0) || (n[1] === 1 && y1 < 1) || (n[1] === -1 && y0 > 0) || (n[2] === 1 && z1 < 1) || (n[2] === -1 && z0 > 0);
   const fx = inset ? x : x + n[0], fy = inset ? y : y + n[1], fz = inset ? z : z + n[2];
@@ -690,35 +714,33 @@ function emitFace(buf, F, x, y, z, tex, tint, getP, getL, box, noAO = false, fla
     if (n[0] !== 0) { su = n[0] > 0 ? 1 - (c[2] ? z1 : z0) : (c[2] ? z1 : z0); sv = 1 - (c[1] ? y1 : y0); }
     else if (n[1] !== 0) { su = c[0] ? x1 : x0; sv = n[1] > 0 ? (c[2] ? z1 : z0) : 1 - (c[2] ? z1 : z0); }
     else { su = n[2] > 0 ? (c[0] ? x1 : x0) : 1 - (c[0] ? x1 : x0); sv = 1 - (c[1] ? y1 : y0); }
+    if (UVROT) { for (let r = 0; r < UVROT; r++) { const t = su; su = 1 - sv; sv = t; } }
     const eps = 0.0005;
     buf.uv.push(u0 + (eps + su * (1 - 2 * eps)) * us, v0 + (eps + sv * (1 - 2 * eps)) * us);
     // AO + smooth light
     let aoV = 3, ls = lc >> 4, lb = lc & 15, cnt = 1;
     if (!noAO && !flat) {
-      const d1 = [0, 0, 0], d2 = [0, 0, 0];
       // tangent directions toward this corner
-      const axes = [0, 1, 2].filter((a) => n[a] === 0);
-      d1[axes[0]] = c[axes[0]] ? 1 : -1;
-      d2[axes[1]] = c[axes[1]] ? 1 : -1;
-      const s1x = fx + d1[0], s1y = fy + d1[1], s1z = fz + d1[2];
-      const s2x = fx + d2[0], s2y = fy + d2[1], s2z = fz + d2[2];
-      const cxx = fx + d1[0] + d2[0], cyy = fy + d1[1] + d2[1], czz = fz + d1[2] + d2[2];
+      const a = c[ax0] ? 1 : -1, bb = c[ax1] ? 1 : -1;
+      const d1x = ax0 === 0 ? a : 0, d1y = ax0 === 1 ? a : 0, d1z = ax0 === 2 ? a : 0;
+      const d2x = ax1 === 0 ? bb : 0, d2y = ax1 === 1 ? bb : 0, d2z = ax1 === 2 ? bb : 0;
+      const s1x = fx + d1x, s1y = fy + d1y, s1z = fz + d1z;
+      const s2x = fx + d2x, s2y = fy + d2y, s2z = fz + d2z;
+      const cxx = fx + d1x + d2x, cyy = fy + d1y + d2y, czz = fz + d1z + d2z;
       const o1 = OPAQUE[getP(s1x, s1y, s1z)], o2 = OPAQUE[getP(s2x, s2y, s2z)], oc = OPAQUE[getP(cxx, cyy, czz)];
       aoV = o1 && o2 ? 0 : 3 - (o1 + o2 + oc);
       if (!o1) { const l = getL(s1x, s1y, s1z); ls += l >> 4; lb += l & 15; cnt++; }
       if (!o2) { const l = getL(s2x, s2y, s2z); ls += l >> 4; lb += l & 15; cnt++; }
       if (!oc && !(o1 && o2)) { const l = getL(cxx, cyy, czz); ls += l >> 4; lb += l & 15; cnt++; }
     }
-    ao.push(aoV);
-    lights.push(ls / cnt / 15, lb / cnt / 15);
+    if (k === 0) ao0 = aoV; else if (k === 1) ao1 = aoV; else if (k === 2) ao2 = aoV; else ao3 = aoV;
+    buf.light.push(ls / cnt / 15, lb / cnt / 15);
     const shadeF = (flat ? 1 : F.s) * AO_CURVE[aoV];
-    const t = tint ?? [1, 1, 1];
     buf.col.push(t[0] * shadeF, t[1] * shadeF, t[2] * shadeF);
+    buf.nrm.push(n[0], n[1], n[2]); buf.mat.push(mat);
   }
-  buf.light.push(...lights);
-  for (let k = 0; k < 4; k++) { buf.nrm.push(n[0], n[1], n[2]); buf.mat.push(mat); }
   // flip quad diagonal for nicer AO interpolation
-  if (ao[0] + ao[2] < ao[1] + ao[3]) buf.ind.push(base + 1, base + 2, base + 3, base + 1, base + 3, base);
+  if (ao0 + ao2 < ao1 + ao3) buf.ind.push(base + 1, base + 2, base + 3, base + 1, base + 3, base);
   else buf.ind.push(base, base + 1, base + 2, base, base + 2, base + 3);
 }
 
@@ -747,24 +769,33 @@ function emitCross(buf, x, y, z, tex, tint, l, mat = 2) {
 }
 
 // ---------------------------------------------------------------- RLE (for saves)
+// Format "2:" = 16-bit values (block ids up to 1023). Older saves are 8-bit without prefix.
 export function rleEncode(arr) {
   const out = [];
   let i = 0;
   while (i < arr.length) {
     const v = arr[i]; let n = 1;
     while (i + n < arr.length && arr[i + n] === v && n < 65535) n++;
-    out.push(v, n & 255, n >> 8);
+    out.push(v & 255, v >> 8, n & 255, n >> 8);
     i += n;
   }
   let s = '';
   const u = new Uint8Array(out);
   for (let k = 0; k < u.length; k += 8192) s += String.fromCharCode.apply(null, u.subarray(k, k + 8192));
-  return btoa(s);
+  return '2:' + btoa(s);
 }
-export function rleDecode(str, len) {
-  const bin = atob(str);
-  const out = new Uint8Array(len);
+export function rleDecode(str, len, Arr = Uint16Array) {
+  const out = new Arr(len);
   let o = 0;
+  if (str.startsWith('2:')) {
+    const bin = atob(str.slice(2));
+    for (let i = 0; i < bin.length; i += 4) {
+      const v = bin.charCodeAt(i) | (bin.charCodeAt(i + 1) << 8), n = bin.charCodeAt(i + 2) | (bin.charCodeAt(i + 3) << 8);
+      out.fill(v, o, o + n); o += n;
+    }
+    return out;
+  }
+  const bin = atob(str);
   for (let i = 0; i < bin.length; i += 3) {
     const v = bin.charCodeAt(i), n = bin.charCodeAt(i + 1) | (bin.charCodeAt(i + 2) << 8);
     out.fill(v, o, o + n); o += n;

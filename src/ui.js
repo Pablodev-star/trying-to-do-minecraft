@@ -1,12 +1,15 @@
 // HUD and every GUI screen (inventory, crafting, furnace, chest, creative, trading, menus).
-import { ITEMS, I, BLOCKS, matchRecipe, SMELTING, fuelTime, creativeTabs, maxStack } from './registry.js';
+import { ITEMS, I, BLOCKS, matchRecipe, SMELTING, fuelTime, creativeTabs, maxStack, sameKind, copyStack } from './registry.js';
 import { iconFor } from './icons.js';
 import { xpForLevel } from './player.js';
 import { tileCanvas } from './textures.js';
+import { ENCHANTS, enchName, tableOffers, anvilCombine, canApply, isEnchanted } from './enchant.js';
+import { PROFESSIONS, LEVEL_NAMES, LEVEL_XP, offerPrice, addTradeXP } from './villagers.js';
+import { EFFECTS, potionName, potionColor, potionEffects, ROMAN, fmtTime, BREW_INGREDIENTS } from './effects.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
-const clone = (s) => (s ? { id: s.id, count: s.count, dmg: s.dmg ?? 0 } : null);
+const clone = (s) => copyStack(s);
 
 export class UI {
   constructor(game) {
@@ -17,6 +20,7 @@ export class UI {
     this.cursor = null;     // item on cursor
     this.craft2 = new Array(4).fill(null);
     this.craft3 = new Array(9).fill(null);
+    this.work = new Array(3).fill(null);   // temporary input slots of anvil / grindstone / smithing / enchanting / stonecutter
     this.creativeTab = 0; this.creativeScroll = 0; this.creativeSearch = '';
     this.chatLines = [];
     this.buildHUD();
@@ -45,6 +49,7 @@ export class UI {
         <div id="xp"><div id="xp-fill"></div><div id="xp-level"></div></div>
         <div id="hotbar"></div>
       </div>
+      <div id="effects"></div>
       <div id="vignette"></div>
       <div id="hurt-flash"></div>
       <div id="portal-overlay"></div>`;
@@ -81,6 +86,9 @@ export class UI {
     $('#air').innerHTML = air;
     $('#xp-fill').style.width = (p.xp / xpForLevel(p.level) * 100) + '%';
     $('#xp-level').textContent = p.level > 0 ? p.level : '';
+    const efs = Object.entries(p.effects ?? {}).filter(([, v]) => v.t > 0);
+    $('#effects').innerHTML = efs.map(([k, v]) => `<div class="effect" style="border-color:#${EFFECTS[k].c.toString(16).padStart(6, '0')}"><span class="ef-dot" style="background:#${EFFECTS[k].c.toString(16).padStart(6, '0')}"></span>${EFFECTS[k].n}${v.a ? ' ' + ROMAN[v.a] : ''} <span class="ef-t">${fmtTime(v.t)}</span></div>`).join('');
+    if (p.absorb > 0) $('#hearts').insertAdjacentHTML('beforeend', '<span class="absorb">' + '♥'.repeat(Math.ceil(p.absorb / 2)) + '</span>');
   }
   inventoryChanged() {
     this.refresh();
@@ -91,7 +99,9 @@ export class UI {
     if (!stack) { div.innerHTML = ''; return; }
     const it = ITEMS[stack.id];
     if (!it) { div.innerHTML = ''; return; }
-    let html = `<img src="${iconFor(stack.id)}" draggable="false">`;
+    const tint = it.kind === 'potion' ? potionColor(stack.data?.potion) : null;
+    let html = `<img src="${iconFor(stack.id, tint)}" draggable="false">`;
+    if (isEnchanted(stack) || it.name === 'enchanted_book' || it.name === 'experience_bottle') html += '<span class="glint"></span>';
     if (stack.count > 1) html += `<span class="count">${stack.count}</span>`;
     if (stack.dmg && it.durability) {
       const r = 1 - stack.dmg / it.durability;
@@ -160,8 +170,8 @@ export class UI {
     if (!this.screen) return;
     const p = this.game.player;
     // return crafting grid and cursor items
-    const ret = (arr) => { for (let i = 0; i < arr.length; i++) if (arr[i]) { const left = p.give(arr[i].id, arr[i].count, arr[i].dmg); if (left) this.game.spawnItem(p.pos.x, p.pos.y + 1.2, p.pos.z, { ...arr[i], count: left }); arr[i] = null; } };
-    ret(this.craft2); ret(this.craft3);
+    const ret = (arr) => { for (let i = 0; i < arr.length; i++) if (arr[i]) { const left = p.give(arr[i].id, arr[i].count, arr[i].dmg, arr[i].data); if (left) this.game.spawnItem(p.pos.x, p.pos.y + 1.2, p.pos.z, { ...arr[i], count: left }); arr[i] = null; } };
+    ret(this.craft2); ret(this.craft3); ret(this.work);
     if (this.cursor) { ret([this.cursor]); this.cursor = null; }
     this.screen = null;
     this.root.classList.add('hidden');
@@ -232,7 +242,7 @@ export class UI {
       playerInv(panel);
     } else if (name === 'furnace') {
       const te = this.screenData;
-      panel.appendChild(el('div', 'label', 'Horno'));
+      panel.appendChild(el('div', 'label', { smoker: 'Ahumador', blast: 'Alto horno' }[te.kind] ?? 'Horno'));
       const f = el('div', 'furnace-area');
       const col = el('div', 'furnace-col');
       addSlot(col, { get: () => te.items[0], set: (v) => { te.items[0] = v; }, group: 'f_in' });
@@ -301,29 +311,143 @@ export class UI {
       bottom.appendChild(hot);
       addSlot(bottom, { get: () => null, set: () => {}, trash: true, group: 'trash' }, 'trash');
       panel.appendChild(bottom);
+    } else if (name === 'container') {
+      const d = this.screenData;
+      panel.appendChild(el('div', 'label', d.title));
+      const g = el('div', 'grid g' + d.cols + ' center-grid');
+      for (let i = 0; i < d.tile.items.length; i++) { const k = i; addSlot(g, { get: () => d.tile.items[k], set: (v) => { d.tile.items[k] = v; }, group: 'chest' }); }
+      panel.appendChild(g);
+      playerInv(panel);
+    } else if (name === 'brewing') {
+      const te = this.screenData;
+      panel.appendChild(el('div', 'label', 'Soporte para pociones'));
+      const area = el('div', 'brew-area');
+      const top = el('div', 'brew-top');
+      addSlot(top, { get: () => te.items[4], set: (v) => { te.items[4] = v; }, group: 'b_fuel', accept: (s) => ITEMS[s.id].name === 'blaze_powder' }, 'fuel-slot');
+      const fuel = el('div', 'brew-fuel'); fuel.innerHTML = `<div style="width:${(te.fuel ?? 0) / 20 * 100}%"></div>`; top.appendChild(fuel);
+      addSlot(top, { get: () => te.items[3], set: (v) => { te.items[3] = v; }, group: 'b_ing', accept: (s) => BREW_INGREDIENTS.has(ITEMS[s.id].name) });
+      const prog = el('div', 'brew-prog'); prog.innerHTML = `<div style="height:${(te.time ?? 0) / 20 * 100}%"></div>`; top.appendChild(prog);
+      area.appendChild(top);
+      const bottles = el('div', 'brew-bottles');
+      for (let i = 0; i < 3; i++) { const k = i; addSlot(bottles, { get: () => te.items[k], set: (v) => { te.items[k] = v; }, group: 'b_bottle', accept: (s) => ITEMS[s.id].kind === 'potion' || ITEMS[s.id].name === 'glass_bottle', max: 1 }); }
+      area.appendChild(bottles);
+      panel.appendChild(area);
+      playerInv(panel);
+    } else if (name === 'enchanting') {
+      const pos = this.screenData;
+      panel.appendChild(el('div', 'label', 'Encantar'));
+      const area = el('div', 'ench-area');
+      const left = el('div', 'ench-left');
+      addSlot(left, { get: () => this.work[0], set: (v) => { this.work[0] = v; }, group: 'work', max: 1 });
+      addSlot(left, { get: () => this.work[1], set: (v) => { this.work[1] = v; }, group: 'work', accept: (s) => ITEMS[s.id].name === 'lapis_lazuli' });
+      area.appendChild(left);
+      const opts = el('div', 'ench-opts');
+      const target = this.work[0];
+      const shelves = this.game.countBookshelves(pos.x, pos.y, pos.z);
+      const canEnch = target && !isEnchanted(target) && Object.keys(ENCHANTS).some((k) => canApply(k, target.id) && ITEMS[target.id].name !== 'enchanted_book');
+      const offers = canEnch ? tableOffers(target.id, shelves, (p.enchSeed ??= (Math.random() * 1e9) | 0) + target.id) : [];
+      [0, 1, 2].forEach((i) => {
+        const o = offers[i];
+        const lapis = this.work[1]?.count ?? 0;
+        const ok = o && Object.keys(o.ench).length && (p.mode === 'creative' || (p.level >= o.cost && lapis >= i + 1));
+        const first = o && Object.entries(o.ench)[0];
+        const b = el('button', 'ench-opt' + (ok ? '' : ' off'), o && first ? `<span class="rune">${'ᚠᚢᚦᚨᚱᚲ'.slice(0, 3 + i)}</span><span class="ench-hint">${enchName(first[0], first[1])}...</span><span class="ench-cost">${o.cost}</span>` : '');
+        b.title = o ? `Coste: ${i + 1} lapislázuli y ${o.cost} niveles` : '';
+        b.onclick = () => {
+          if (!ok) { this.game.sfx('no'); return; }
+          const isBook = ITEMS[target.id].name === 'book';
+          this.work[0] = { id: isBook ? I.enchanted_book : target.id, count: 1, dmg: target.dmg ?? 0, data: { ...(target.data ?? {}), ench: o.ench } };
+          if (p.mode !== 'creative') { p.level -= i + 1; this.work[1].count -= i + 1; if (this.work[1].count <= 0) this.work[1] = null; }
+          p.enchSeed = (Math.random() * 1e9) | 0;
+          this.game.sfx('levelup'); this.game.achieve('¡Encantador!');
+          this.afterClick();
+        };
+        opts.appendChild(b);
+      });
+      area.appendChild(opts);
+      panel.appendChild(area);
+      panel.appendChild(el('div', 'hint dark', `Estanterías cerca: ${shelves}/15`));
+      playerInv(panel);
+    } else if (name === 'anvil' || name === 'grindstone' || name === 'smithing') {
+      const title = { anvil: 'Reparar y nombrar', grindstone: 'Reparar y desencantar', smithing: 'Mejorar equipamiento' }[name];
+      panel.appendChild(el('div', 'label', title));
+      const area = el('div', 'work-area');
+      if (name === 'anvil') {
+        const inp = el('input', 'rename'); inp.placeholder = this.work[0] ? (this.work[0].data?.name ?? ITEMS[this.work[0].id].display) : '';
+        inp.value = this.renameText ?? '';
+        inp.onkeydown = (e) => e.stopPropagation();
+        inp.oninput = () => { this.renameText = inp.value; this.renderScreen(); const r = $('.rename', this.root); r.focus(); r.setSelectionRange(r.value.length, r.value.length); };
+        panel.appendChild(inp);
+      }
+      const row = el('div', 'craft-row');
+      addSlot(row, { get: () => this.work[0], set: (v) => { this.work[0] = v; if (!v) this.renameText = ''; }, group: 'work', max: name === 'smithing' ? 1 : undefined });
+      row.appendChild(el('div', 'plus', '+'));
+      addSlot(row, { get: () => this.work[1], set: (v) => { this.work[1] = v; }, group: 'work' });
+      row.appendChild(el('div', 'arrow'));
+      const res = this.workResult(name);
+      const affordable = res && (name !== 'anvil' || p.mode === 'creative' || p.level >= res.cost);
+      addSlot(row, { get: () => (affordable ? res.stack : null), set: () => {}, output: true, takeAll: true, consume: () => this.consumeWork(name, res), group: 'output' }, 'big');
+      area.appendChild(row);
+      if (name === 'anvil' && res) area.appendChild(el('div', 'cost ' + (p.level >= res.cost || p.mode === 'creative' ? 'ok' : 'bad'), `Coste de experiencia: ${res.cost}`));
+      panel.appendChild(area);
+      playerInv(panel);
+    } else if (name === 'stonecutter') {
+      panel.appendChild(el('div', 'label', 'Cortapiedras'));
+      const area = el('div', 'work-area');
+      const row = el('div', 'craft-row');
+      addSlot(row, { get: () => this.work[0], set: (v) => { this.work[0] = v; }, group: 'work' });
+      const opts = el('div', 'grid g4 cut-opts');
+      const inName = this.work[0] ? ITEMS[this.work[0].id].name : null;
+      const outs = inName ? stonecutterOutputs(inName) : [];
+      for (const [n, c] of outs) {
+        addSlot(opts, { get: () => (this.work[0]?.count > 0 && ITEMS[this.work[0].id].name === inName ? { id: I[n], count: c, dmg: 0 } : null), set: () => {}, output: true, consume: () => { this.work[0].count--; if (this.work[0].count <= 0) this.work[0] = null; }, group: 'output' });
+      }
+      row.appendChild(opts);
+      area.appendChild(row);
+      panel.appendChild(area);
+      playerInv(panel);
     } else if (name === 'trade') {
       const v = this.screenData;
-      panel.appendChild(el('div', 'label', 'Aldeano - Comercio'));
+      const prof = PROFESSIONS[v.profession];
+      panel.classList.add('wide');
+      panel.appendChild(el('div', 'label', `${prof?.n ?? 'Aldeano'} - ${LEVEL_NAMES[v.vlevel - 1]}`));
+      const next = LEVEL_XP[v.vlevel] ?? null;
+      const bar = el('div', 'vxp'); bar.innerHTML = `<div style="width:${next ? Math.min(100, (v.vxp - LEVEL_XP[v.vlevel - 1]) / (next - LEVEL_XP[v.vlevel - 1]) * 100) : 100}%"></div>`;
+      panel.appendChild(bar);
       const list = el('div', 'trades');
-      for (const t of v.trades) {
-        const row = el('div', 'trade');
-        const cost = el('div', 'slot'); this.fillSlot(cost, { id: I[t.cost[0]], count: t.cost[1] });
-        const arr = el('div', 'arrow small');
-        const out = el('div', 'slot'); this.fillSlot(out, { id: I[t.give[0]], count: t.give[1] });
-        const btn = el('button', 'mc-btn small', 'Comerciar');
+      for (const o of v.offers) {
+        const row = el('div', 'trade' + (o.uses >= o.maxUses ? ' sold' : ''));
+        const price = offerPrice(v, o, v.rep);
+        const cost = el('div', 'slot'); this.fillSlot(cost, { id: I[o.cost[0]], count: price });
+        if (price < o.cost[1]) cost.insertAdjacentHTML('beforeend', `<span class="old-price">${o.cost[1]}</span>`);
+        row.appendChild(cost);
+        if (o.cost2) { const c2 = el('div', 'slot'); this.fillSlot(c2, { id: I[o.cost2[0]], count: o.cost2[1] }); row.appendChild(c2); }
+        row.appendChild(el('div', 'arrow small' + (o.uses >= o.maxUses ? ' x' : '')));
+        const out = el('div', 'slot'); this.fillSlot(out, { id: I[o.give[0]], count: o.give[1], data: o.data });
+        out.title = o.data?.ench ? Object.entries(o.data.ench).map(([k, l]) => enchName(k, l)).join(', ') : ITEMS[I[o.give[0]]].display;
+        row.appendChild(out);
+        const btn = el('button', 'mc-btn small', o.uses >= o.maxUses ? 'Agotado' : 'Comerciar');
         btn.onclick = () => {
-          if (p.countItem(I[t.cost[0]]) >= t.cost[1] || p.mode === 'creative') {
-            if (p.mode !== 'creative') p.takeItem(I[t.cost[0]], t.cost[1]);
-            const left = p.give(I[t.give[0]], t.give[1]);
-            if (left) this.game.spawnItem(p.pos.x, p.pos.y + 1, p.pos.z, { id: I[t.give[0]], count: left });
-            p.addXP(2); this.game.sfx('trade');
-            this.renderScreen();
-          } else this.game.sfx('no');
+          if (o.uses >= o.maxUses) { this.game.sfx('no'); return; }
+          const has = p.mode === 'creative' || (p.countItem(I[o.cost[0]]) >= price && (!o.cost2 || p.countItem(I[o.cost2[0]]) >= o.cost2[1]));
+          if (!has) { this.game.sfx('no'); return; }
+          if (p.mode !== 'creative') { p.takeItem(I[o.cost[0]], price); if (o.cost2) p.takeItem(I[o.cost2[0]], o.cost2[1]); }
+          const left = p.give(I[o.give[0]], o.give[1], 0, o.data ? JSON.parse(JSON.stringify(o.data)) : undefined);
+          if (left) this.game.spawnItem(p.pos.x, p.pos.y + 1, p.pos.z, { id: I[o.give[0]], count: left, data: o.data });
+          o.uses++;
+          v.rep = Math.min(100, (v.rep ?? 0) + 1);
+          addTradeXP(v, o.xp);
+          this.game.spawnXP(v.pos.x, v.pos.y + 1, v.pos.z, 3 + Math.floor(Math.random() * 4));
+          this.game.sfx('trade');
+          this.game.achieve('¿Qué te pongo?');
+          this.renderScreen();
         };
-        row.append(cost, arr, out, btn);
+        row.appendChild(btn);
         list.appendChild(row);
       }
       panel.appendChild(list);
+      const rep = v.rep ?? 0;
+      panel.appendChild(el('div', 'hint dark', `Reputación con este aldeano: ${rep > 0 ? '+' : ''}${rep}${rep >= 20 ? ' (descuentos)' : rep <= -20 ? ' (precios altos)' : ''}`));
       playerInv(panel);
     }
     // bind slot events
@@ -366,12 +490,74 @@ export class UI {
     this.renderCursor();
   }
 
+  workResult(name) {
+    const [a, b] = this.work;
+    const p = this.game.player;
+    if (name === 'anvil') {
+      if (!a) return null;
+      const it = ITEMS[a.id];
+      const mat = { iron: 'iron_ingot', golden: 'gold_ingot', diamond: 'diamond', netherite: 'netherite_ingot', stone: 'cobblestone', wooden: 'oak_planks', leather: 'leather', chainmail: 'iron_ingot' }[it.name.split('_')[0]];
+      const materialOk = b && mat && ITEMS[b.id].name === mat;
+      const r = anvilCombine(a, b, materialOk, this.renameText ? this.renameText : null);
+      if (!r || (r.cost >= 40 && p.mode !== 'creative')) return null;
+      return r;
+    }
+    if (name === 'grindstone') {
+      if (!a && !b) return null;
+      if (a && b && a.id !== b.id) return null;
+      const base = a ?? b;
+      const it = ITEMS[base.id];
+      if (!it.durability && ITEMS[base.id].name !== 'enchanted_book') return null;
+      const out = copyStack(base, 1);
+      if (a && b && it.durability) out.dmg = Math.max(0, it.durability - ((it.durability - (a.dmg ?? 0)) + (it.durability - (b.dmg ?? 0)) + Math.floor(it.durability * 0.05)));
+      const xp = Object.values({ ...(a?.data?.ench ?? {}), ...(b?.data?.ench ?? {}) }).reduce((s, l) => s + l * 3, 0);
+      if (out.data) { delete out.data.ench; delete out.data.repairCost; if (!Object.keys(out.data).length) delete out.data; }
+      if (ITEMS[out.id].name === 'enchanted_book') out.id = I.book;
+      if (!xp && !(a && b)) return null;
+      return { stack: out, xp };
+    }
+    if (name === 'smithing') {
+      if (!a || !b || ITEMS[b.id].name !== 'netherite_ingot') return null;
+      const n = ITEMS[a.id].name;
+      if (!n.startsWith('diamond_')) return null;
+      const target = I['netherite_' + n.slice(8)];
+      if (target == null) return null;
+      return { stack: { ...copyStack(a, 1), id: target } };
+    }
+    return null;
+  }
+  consumeWork(name, res) {
+    const p = this.game.player;
+    if (!res) return;
+    if (name === 'anvil') {
+      if (p.mode !== 'creative') p.level = Math.max(0, p.level - res.cost);
+      this.work[0] = null;
+      if (this.work[1]) { const used = res.units ?? 1; this.work[1].count -= used; if (this.work[1].count <= 0) this.work[1] = null; }
+      this.renameText = '';
+      this.game.sfx('anvil');
+    } else if (name === 'grindstone') {
+      this.work[0] = null; this.work[1] = null;
+      if (res.xp) this.game.spawnXP(p.pos.x, p.pos.y + 1, p.pos.z, res.xp);
+      this.game.sfx('grind');
+    } else if (name === 'smithing') {
+      this.work[0] = null; this.work[1].count--; if (this.work[1].count <= 0) this.work[1] = null;
+      this.game.sfx('anvil');
+    }
+  }
+
   showTooltip() {
     const def = this.slotDefs?.[this.hover];
     const s = def?.get();
     if (!s || this.cursor || this.game.touch) { this.tooltip.classList.add('hidden'); return; }
     const it = ITEMS[s.id];
-    let html = `<div class="tt-name ${it.name.includes('golden_apple') || it.name === 'totem' ? 'rare' : ''}">${it.display}</div>`;
+    const title = s.data?.name ? `<i>${escapeHtml(s.data.name)}</i>` : it.kind === 'potion' ? potionName(s.data?.potion, it.splash) : it.display;
+    let html = `<div class="tt-name ${it.name.includes('golden_apple') || it.name === 'totem' || isEnchanted(s) ? (isEnchanted(s) ? 'ench' : 'rare') : ''}">${title}</div>`;
+    for (const [k, l] of Object.entries(s.data?.ench ?? {})) html += `<div class="tt-line gray">${enchName(k, l)}</div>`;
+    if (it.kind === 'potion') {
+      const efs = potionEffects(s.data?.potion);
+      if (!efs.length) html += '<div class="tt-line gray">Sin efectos</div>';
+      for (const ef of efs) html += `<div class="tt-line ${EFFECTS[ef.e].good ? 'blue' : 'red'}">${EFFECTS[ef.e].n}${ef.a ? ' ' + ROMAN[ef.a] : ''}${ef.t ? ` (${fmtTime(ef.t * (it.splash ? 0.75 : 1))})` : ''}</div>`;
+    }
     if (it.damage && it.kind === 'tool') html += `<div class="tt-line">+${it.damage} de daño</div>`;
     if (it.armor) html += `<div class="tt-line blue">+${it.armor} de armadura</div>`;
     if (it.durability && s.dmg) html += `<div class="tt-line gray">Durabilidad: ${it.durability - s.dmg} / ${it.durability}</div>`;
@@ -407,15 +593,15 @@ export class UI {
         for (let n = 0; n < 64; n++) {
           const s = def.get();
           if (!s) break;
-          const left = p.give(s.id, s.count, s.dmg);
+          const left = p.give(s.id, s.count, s.dmg, s.data);
           def.consume();
-          if (left) { this.game.spawnItem(p.pos.x, p.pos.y + 1, p.pos.z, { id: s.id, count: left }); break; }
+          if (left) { this.game.spawnItem(p.pos.x, p.pos.y + 1, p.pos.z, { ...s, count: left }); break; }
           if (def.takeAll) break;
           this.renderScreen();
         }
         this.game.sfx('craft');
       } else {
-        if (this.cursor && (this.cursor.id !== stack.id || this.cursor.count + stack.count > maxStack(stack.id))) return;
+        if (this.cursor && (!sameKind(this.cursor, stack) || this.cursor.count + stack.count > maxStack(stack.id))) return;
         if (this.cursor) this.cursor.count += stack.count; else this.cursor = clone(stack);
         def.consume();
       }
@@ -429,7 +615,7 @@ export class UI {
         if (!s) break;
         const cur = t.get();
         if (t.armor != null) { if (ITEMS[s.id].slot === t.armor && !cur) { t.set(s); s = null; } continue; }
-        if (cur && cur.id === s.id && !cur.dmg && !s.dmg) { const n = Math.min(s.count, maxStack(s.id) - cur.count); cur.count += n; s.count -= n; if (s.count <= 0) s = null; }
+        if (sameKind(cur, s)) { const n = Math.min(s.count, maxStack(s.id) - cur.count); cur.count += n; s.count -= n; if (s.count <= 0) s = null; }
       }
       for (const t of targets) {
         if (!s) break;
@@ -440,11 +626,13 @@ export class UI {
       this.afterClick(); return;
     }
     if (def.armor != null && this.cursor && ITEMS[this.cursor.id].slot !== def.armor) return;
+    if (def.accept && this.cursor && !def.accept(this.cursor)) return;
+    if (def.max === 1 && this.cursor && !stack && button === 0 && this.cursor.count > 1) { def.set(copyStack(this.cursor, 1)); this.cursor.count--; this.afterClick(); return; }
     const max = stack ? maxStack(stack.id) : 64;
     if (button === 0) {
       if (!this.cursor) { this.cursor = stack; def.set(null); }
       else if (!stack) { def.set(this.cursor); this.cursor = null; }
-      else if (stack.id === this.cursor.id && !stack.dmg && !this.cursor.dmg) {
+      else if (sameKind(stack, this.cursor)) {
         const n = Math.min(this.cursor.count, max - stack.count);
         stack.count += n; this.cursor.count -= n;
         if (this.cursor.count <= 0) this.cursor = null;
@@ -453,12 +641,12 @@ export class UI {
     } else if (button === 2) {
       if (!this.cursor && stack) {
         const half = Math.ceil(stack.count / 2);
-        this.cursor = { ...stack, count: half };
+        this.cursor = copyStack(stack, half);
         stack.count -= half;
         def.set(stack.count > 0 ? stack : null);
       } else if (this.cursor) {
-        if (!stack) { def.set({ ...this.cursor, count: 1 }); this.cursor.count--; }
-        else if (stack.id === this.cursor.id && stack.count < max && !stack.dmg) { stack.count++; this.cursor.count--; def.set(stack); }
+        if (!stack) { def.set(copyStack(this.cursor, 1)); this.cursor.count--; }
+        else if (sameKind(stack, this.cursor) && stack.count < max) { stack.count++; this.cursor.count--; def.set(stack); }
         else { def.set(this.cursor); this.cursor = stack; }
         if (this.cursor && this.cursor.count <= 0) this.cursor = null;
       }
@@ -474,12 +662,12 @@ export class UI {
     const it = ITEMS[def.get().id];
     switch (def.group) {
       case 'hotbar':
-        if (this.screen === 'chest') return by(['chest']);
+        if (this.screen === 'chest' || this.screen === 'container') return by(['chest']);
         if (this.screen === 'furnace') return SMELTING[it.name] ? by(['f_in']) : fuelTime(it.id) ? by(['f_fuel']) : by(['main']);
         if (it.armor != null && this.screen === 'inventory') return [...by(['armor']), ...by(['main'])];
         return by(['main']);
       case 'main':
-        if (this.screen === 'chest') return by(['chest']);
+        if (this.screen === 'chest' || this.screen === 'container') return by(['chest']);
         if (this.screen === 'furnace') return SMELTING[it.name] ? by(['f_in']) : fuelTime(it.id) ? by(['f_fuel']) : by(['hotbar']);
         if (it.armor != null && this.screen === 'inventory') return [...by(['armor']), ...by(['hotbar'])];
         return by(['hotbar']);
@@ -514,25 +702,13 @@ export class UI {
     const s = def?.get();
     if (!s || def.output || def.creative) return;
     const n = all ? s.count : 1;
-    this.game.dropStack({ ...s, count: n });
+    this.game.dropStack(copyStack(s, n));
     s.count -= n;
     def.set(s.count > 0 ? s : null);
     this.afterClick();
   }
 
-  openTrade(villager) {
-    if (!villager.trades) {
-      const pool = [
-        { cost: ['wheat', 20], give: ['emerald', 1] }, { cost: ['emerald', 1], give: ['bread', 6] }, { cost: ['coal', 15], give: ['emerald', 1] },
-        { cost: ['emerald', 3], give: ['iron_pickaxe', 1] }, { cost: ['paper', 24], give: ['emerald', 1] }, { cost: ['emerald', 1], give: ['bookshelf', 1] },
-        { cost: ['potato', 26], give: ['emerald', 1] }, { cost: ['emerald', 1], give: ['apple', 4] }, { cost: ['emerald', 7], give: ['diamond_sword', 1] },
-        { cost: ['string', 20], give: ['emerald', 1] }, { cost: ['emerald', 1], give: ['arrow', 16] }, { cost: ['emerald', 2], give: ['glass', 4] },
-        { cost: ['rotten_flesh', 32], give: ['emerald', 1] }, { cost: ['emerald', 1], give: ['redstone', 2] }, { cost: ['emerald', 5], give: ['ender_pearl', 1] },
-      ];
-      villager.trades = pool.sort(() => Math.random() - 0.5).slice(0, 5);
-    }
-    this.open('trade', villager);
-  }
+  openTrade(villager) { this.open('trade', villager); }
 
   // ---------------------------------------------------------------- menus
   menu(html, cls = '') {
@@ -660,4 +836,22 @@ function setupIconVars() {
   const c = document.createElement('canvas'); c.width = c.height = 16;
   const g = c.getContext('2d'); g.drawImage(d, 0, 0); g.fillStyle = 'rgba(0,0,0,0.75)'; g.fillRect(0, 0, 16, 16);
   root.setProperty('--dirt-bg', `url(${c.toDataURL()})`);
+}
+
+// stone-cutter recipes: input -> [[output, count]]
+function stonecutterOutputs(n) {
+  const map = {
+    stone: [['stone_slab', 2], ['stone_stairs', 1], ['stone_bricks', 1], ['stone_brick_slab', 2], ['stone_brick_stairs', 1], ['smooth_stone', 1]],
+    cobblestone: [['cobblestone_slab', 2], ['cobblestone_stairs', 1]],
+    stone_bricks: [['stone_brick_slab', 2], ['stone_brick_stairs', 1]],
+    bricks: [['brick_slab', 2], ['brick_stairs', 1]],
+    sandstone: [['sandstone_slab', 2], ['sandstone_stairs', 1]],
+    smooth_stone: [['smooth_stone_slab', 2]],
+    quartz_block: [['quartz_slab', 2], ['quartz_stairs', 1]],
+    nether_bricks: [['nether_brick_slab', 2], ['nether_brick_stairs', 1], ['nether_brick_fence', 1]],
+    purpur_block: [['purpur_slab', 2], ['purpur_stairs', 1]],
+    end_stone: [['end_stone_bricks', 1]],
+    granite: [['granite', 1]], diorite: [['diorite', 1]], andesite: [['andesite', 1]],
+  };
+  return (map[n] ?? []).filter(([o]) => I[o] != null);
 }

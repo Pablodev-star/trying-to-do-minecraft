@@ -3,7 +3,8 @@ import { WOOL_COLORS, SPAWN_EGG_COLORS } from './textures.js';
 
 export const BLOCKS = [];   // id -> block def
 export const B = {};        // name -> block id
-export const ITEMS = [];    // id -> item def (blocks occupy ids < 256)
+export const BLOCK_LIMIT = 1024; // block ids are 0..1023, item ids start at 1024
+export const ITEMS = [];    // id -> item def (blocks occupy ids < BLOCK_LIMIT)
 export const I = {};        // name -> item id
 
 const T = (top, side, bottom = top, front = side) => ({ top, side, bottom, front });
@@ -36,6 +37,8 @@ function block(name, display, p = {}) {
     shape: p.shape ?? null,             // slab | stairs | fence | pane | torch | door | bed
     base: p.base ?? null,               // full block a double slab turns into
     anim: p.anim ?? 0,                  // animated texture: 1 water, 2 lava, 3 portal
+    facing6: p.facing6 ?? false,        // meta 0..5 = facing direction (pistons, observers, dispensers)
+    topRot: p.topRot ?? false,          // top texture rotates with meta & 3
   };
   BLOCKS.push(def); B[name] = id;
   if (!def.noItem) { ITEMS[id] = { id, name, display, stack: p.stack ?? 64, block: id, kind: 'block' }; I[name] = id; }
@@ -197,13 +200,109 @@ block('nether_brick_fence', 'Valla de ladrillos del Nether', { tex: 'nether_bric
 block('glass_pane', 'Panel de cristal', { tex: 'glass', render: 'box', shape: 'pane', opaque: false, pass: 'cutout', hardness: 0.3, drops: null, sound: 'glass' });
 block('iron_bars', 'Barrotes de hierro', { tex: 'iron_bars', render: 'box', shape: 'pane', opaque: false, pass: 'cutout', hardness: 5, tool: 'pickaxe', needsTool: true });
 block('lantern', 'Farol', { tex: T('lantern_top', 'lantern'), render: 'box', box: [5, 0, 5, 11, 9, 11], opaque: false, hardness: 3.5, tool: 'pickaxe', light: 15, sound: 'stone' });
+// Work stations (also villager job sites)
+block('enchanting_table', 'Mesa de encantamientos', { tex: T('enchanting_table_top', 'enchanting_table_side', 'obsidian'), render: 'box', box: [0, 0, 0, 16, 12, 16], opaque: false, hardness: 5, tool: 'pickaxe', needsTool: true, light: 7 });
+block('anvil', 'Yunque', { tex: T('anvil_top', 'anvil'), render: 'box', box: [2, 0, 3, 14, 16, 13], opaque: false, hardness: 5, tool: 'pickaxe', needsTool: true, orient: true, gravity: true });
+block('brewing_stand', 'Soporte para pociones', { tex: T('brewing_stand_top', 'brewing_stand'), render: 'box', box: [2, 0, 2, 14, 14, 14], pass: 'cutout', opaque: false, hardness: 0.5, tool: 'pickaxe', light: 1 });
+block('cauldron', 'Caldero', { tex: T('cauldron_top', 'cauldron_side', 'cauldron_side'), render: 'box', box: [0, 0, 0, 16, 16, 16], pass: 'cutout', opaque: false, hardness: 2, tool: 'pickaxe', needsTool: true });
+block('grindstone', 'Afiladora', { tex: T('grindstone_top', 'grindstone'), render: 'box', box: [2, 0, 4, 14, 14, 12], opaque: false, hardness: 2, tool: 'pickaxe', orient: true });
+block('smithing_table', 'Mesa de herrería', { tex: T('smithing_table_top', 'smithing_table_side', 'smithing_table_bottom'), hardness: 2.5, tool: 'axe', sound: 'wood' });
+block('stonecutter', 'Cortapiedras', { tex: T('stonecutter_top', 'stonecutter_side', 'smooth_stone'), render: 'box', box: [0, 0, 0, 16, 9, 16], opaque: false, hardness: 3.5, tool: 'pickaxe' });
+block('loom', 'Telar', { tex: T('loom_top', 'loom_side', 'oak_planks', 'loom_front'), hardness: 2.5, tool: 'axe', orient: true, sound: 'wood' });
+block('cartography_table', 'Mesa de cartografía', { tex: T('cartography_top', 'cartography_side', 'dark_planks'), hardness: 2.5, tool: 'axe', sound: 'wood' });
+block('fletching_table', 'Mesa de flechería', { tex: T('fletching_top', 'fletching_side', 'birch_planks'), hardness: 2.5, tool: 'axe', sound: 'wood' });
+block('smoker', 'Ahumador', { tex: T('smoker_top', 'smoker_side', 'smoker_top', 'smoker_front'), hardness: 3.5, tool: 'pickaxe', needsTool: true, orient: true });
+block('lit_smoker', 'Ahumador encendido', { tex: T('smoker_top', 'smoker_side', 'smoker_top', 'smoker_front_on'), hardness: 3.5, tool: 'pickaxe', needsTool: true, orient: true, light: 13, drops: 'smoker', noItem: true });
+block('blast_furnace', 'Alto horno', { tex: T('blast_top', 'blast_side', 'blast_top', 'blast_front'), hardness: 3.5, tool: 'pickaxe', needsTool: true, orient: true });
+block('lit_blast_furnace', 'Alto horno encendido', { tex: T('blast_top', 'blast_side', 'blast_top', 'blast_front_on'), hardness: 3.5, tool: 'pickaxe', needsTool: true, orient: true, light: 13, drops: 'blast_furnace', noItem: true });
+block('barrel', 'Barril', { tex: T('barrel_top', 'barrel_side', 'barrel_bottom'), hardness: 2.5, tool: 'axe', sound: 'wood' });
+block('composter', 'Compostador', { tex: T('composter_top', 'composter_side', 'composter_bottom'), render: 'box', box: [0, 0, 0, 16, 16, 16], pass: 'cutout', opaque: false, hardness: 0.6, tool: 'axe', sound: 'wood' });
+block('lectern', 'Atril', { tex: T('lectern_top', 'lectern_side', 'oak_planks'), render: 'box', box: [0, 0, 0, 16, 14, 16], opaque: false, hardness: 2.5, tool: 'axe', orient: true, sound: 'wood' });
+for (let i = 0; i < 4; i++) block(`nether_wart_${i}`, 'Verruga del Nether', { render: 'cross', hardness: 0, noItem: true, sound: 'grass', drops: () => [['nether_wart', i === 3 ? 2 + Math.floor(Math.random() * 3) : 1]] });
+// Redstone
+block('redstone_wire', 'Polvo de redstone', { tex: 'redstone_dust', render: 'box', shape: 'wire', pass: 'cutout', solid: false, opaque: false, hardness: 0, noItem: true, drops: 'redstone' });
+block('redstone_torch', 'Antorcha de redstone', { tex: 'redstone_torch', render: 'box', shape: 'torch', solid: false, opaque: false, hardness: 0, light: 7, sound: 'wood' });
+block('unlit_redstone_torch', 'Antorcha de redstone', { tex: 'redstone_torch_off', render: 'box', shape: 'torch', solid: false, opaque: false, hardness: 0, noItem: true, drops: 'redstone_torch', sound: 'wood' });
+block('lever', 'Palanca', { tex: 'lever', render: 'box', shape: 'lever', solid: false, opaque: false, hardness: 0.5, sound: 'wood' });
+block('stone_button', 'Botón de piedra', { tex: 'stone', render: 'box', shape: 'button', solid: false, opaque: false, hardness: 0.5 });
+block('oak_button', 'Botón de roble', { tex: 'oak_planks', render: 'box', shape: 'button', solid: false, opaque: false, hardness: 0.5, sound: 'wood' });
+block('stone_pressure_plate', 'Placa de presión de piedra', { tex: 'stone', render: 'box', shape: 'plate', solid: false, opaque: false, hardness: 0.5, tool: 'pickaxe' });
+block('oak_pressure_plate', 'Placa de presión de roble', { tex: 'oak_planks', render: 'box', shape: 'plate', solid: false, opaque: false, hardness: 0.5, tool: 'axe', sound: 'wood' });
+block('repeater', 'Repetidor de redstone', { tex: T('repeater', 'smooth_stone'), render: 'box', box: [0, 0, 0, 16, 2, 16], opaque: false, hardness: 0, orient: true, topRot: true });
+block('powered_repeater', 'Repetidor de redstone', { tex: T('repeater_on', 'smooth_stone'), render: 'box', box: [0, 0, 0, 16, 2, 16], opaque: false, hardness: 0, orient: true, topRot: true, noItem: true, drops: 'repeater', light: 7 });
+block('comparator', 'Comparador de redstone', { tex: T('comparator', 'smooth_stone'), render: 'box', box: [0, 0, 0, 16, 2, 16], opaque: false, hardness: 0, orient: true, topRot: true });
+block('redstone_lamp', 'Lámpara de redstone', { hardness: 0.3, sound: 'glass' });
+block('lit_redstone_lamp', 'Lámpara de redstone', { tex: 'redstone_lamp_on', hardness: 0.3, light: 15, noItem: true, drops: 'redstone_lamp', sound: 'glass' });
+block('piston', 'Pistón', { tex: { top: 'piston_top', side: 'piston_side', bottom: 'piston_bottom', front: 'piston_top', back: 'piston_bottom' }, render: 'box', shape: 'piston', facing6: true, opaque: false, hardness: 1.5, tool: 'pickaxe' });
+block('sticky_piston', 'Pistón pegajoso', { tex: { top: 'piston_top_sticky', side: 'piston_side', bottom: 'piston_bottom', front: 'piston_top_sticky', back: 'piston_bottom' }, render: 'box', shape: 'piston', facing6: true, opaque: false, hardness: 1.5, tool: 'pickaxe' });
+block('piston_head', 'Cabeza de pistón', { tex: { top: 'piston_top', side: 'piston_side', bottom: 'piston_top', front: 'piston_top', back: 'piston_top' }, render: 'box', shape: 'piston_head', facing6: true, opaque: false, hardness: 1.5, noItem: true, drops: null });
+block('observer', 'Observador', { tex: { top: 'observer_top', side: 'observer_side', bottom: 'observer_top', front: 'observer_front', back: 'observer_back' }, facing6: true, hardness: 3, tool: 'pickaxe', needsTool: true });
+block('dispenser', 'Dispensador', { tex: { top: 'furnace_top', side: 'furnace_side', bottom: 'furnace_top', front: 'dispenser_front', back: 'furnace_side' }, facing6: true, hardness: 3.5, tool: 'pickaxe', needsTool: true });
+block('dropper', 'Soltador', { tex: { top: 'furnace_top', side: 'furnace_side', bottom: 'furnace_top', front: 'dropper_front', back: 'furnace_side' }, facing6: true, hardness: 3.5, tool: 'pickaxe', needsTool: true });
+block('hopper', 'Tolva', { tex: T('hopper_top', 'hopper_side'), render: 'box', shape: 'hopper', opaque: false, hardness: 3, tool: 'pickaxe', needsTool: true });
+block('note_block', 'Bloque musical', { hardness: 0.8, tool: 'axe', sound: 'wood' });
+block('daylight_detector', 'Sensor de luz solar', { tex: T('daylight_top', 'daylight_side'), render: 'box', box: [0, 0, 0, 16, 6, 16], opaque: false, hardness: 0.2, tool: 'axe', sound: 'wood' });
+block('target', 'Diana', { tex: T('target_top', 'target_side'), hardness: 0.5, tool: 'hoe', sound: 'grass' });
+block('iron_door', 'Puerta de hierro', { tex: 'iron_door_bottom', render: 'box', shape: 'door', opaque: false, hardness: 5, tool: 'pickaxe', needsTool: true, orient: true });
+block('rail', 'Raíl', { tex: 'rail', render: 'box', shape: 'rail', pass: 'cutout', solid: false, opaque: false, hardness: 0.7, tool: 'pickaxe' });
+block('powered_rail', 'Raíl propulsor', { tex: 'powered_rail', render: 'box', shape: 'rail', pass: 'cutout', solid: false, opaque: false, hardness: 0.7, tool: 'pickaxe' });
+block('detector_rail', 'Raíl detector', { tex: 'detector_rail', render: 'box', shape: 'rail', pass: 'cutout', solid: false, opaque: false, hardness: 0.7, tool: 'pickaxe' });
+block('activator_rail', 'Raíl activador', { tex: 'activator_rail', render: 'box', shape: 'rail', pass: 'cutout', solid: false, opaque: false, hardness: 0.7, tool: 'pickaxe' });
+// New biome blocks
+for (const [w, n, leafTint] of [['dark_oak', 'roble oscuro', 'foliage_dark_oak'], ['cherry', 'cerezo', null], ['mangrove', 'mangle', 'foliage_mangrove']]) {
+  block(`${w}_planks`, `Tablones de ${n}`, { hardness: 2, tool: 'axe', flammable: true, sound: 'wood' });
+  block(`${w}_log`, `Tronco de ${n}`, { tex: T(`${w}_log_top`, `${w}_log`), hardness: 2, tool: 'axe', flammable: true, sound: 'wood' });
+  block(`${w}_leaves`, `Hojas de ${n}`, { hardness: 0.2, tool: 'hoe', pass: 'cutout', opaque: false, tint: leafTint ?? undefined, flammable: true, sound: 'grass', drops: () => (Math.random() < 0.05 ? [[`${w}_sapling`, 1]] : Math.random() < 0.02 ? [['stick', 1]] : []) });
+  block(`${w}_sapling`, `Brote de ${n}`, { render: 'cross', hardness: 0, sound: 'grass' });
+}
+block('mangrove_roots', 'Raíces de mangle', { render: 'cube', pass: 'cutout', opaque: false, hardness: 0.7, tool: 'axe', sound: 'wood' });
+block('mud', 'Barro', { hardness: 0.5, tool: 'shovel', sound: 'sand', slow: 0.2 });
+block('mud_bricks', 'Ladrillos de barro', { hardness: 1.5, tool: 'pickaxe' });
+block('mycelium', 'Micelio', { tex: T('mycelium_top', 'mycelium_side', 'dirt'), hardness: 0.6, tool: 'shovel', drops: 'dirt', sound: 'grass' });
+block('red_mushroom_block', 'Bloque de champiñón rojo', { hardness: 0.2, tool: 'axe', drops: () => (Math.random() < 0.15 ? [['red_mushroom', 1]] : []), sound: 'wood' });
+block('brown_mushroom_block', 'Bloque de champiñón marrón', { hardness: 0.2, tool: 'axe', drops: () => (Math.random() < 0.15 ? [['brown_mushroom', 1]] : []), sound: 'wood' });
+block('mushroom_stem', 'Tallo de champiñón', { hardness: 0.2, tool: 'axe', drops: null, sound: 'wood' });
+block('red_sandstone', 'Arenisca roja', { tex: T('red_sandstone_top', 'red_sandstone'), hardness: 0.8, tool: 'pickaxe', needsTool: true });
+for (const [c, n] of [['white', 'blanca'], ['orange', 'naranja'], ['yellow', 'amarilla'], ['red', 'roja'], ['brown', 'marrón'], ['light_gray', 'gris claro']]) block(`${c}_terracotta`, `Terracota ${n}`, { hardness: 1.25, tool: 'pickaxe', needsTool: true });
+block('blue_ice', 'Hielo azul', { hardness: 2.8, tool: 'pickaxe', drops: null, sound: 'glass' });
+for (const [c, n] of [['tube', 'tubo'], ['brain', 'cerebro'], ['fire', 'fuego'], ['horn', 'cuerno']]) block(`${c}_coral_block`, `Bloque de coral de ${n}`, { hardness: 1.5, tool: 'pickaxe', needsTool: true });
+block('sweet_berry_bush', 'Arbusto de bayas dulces', { render: 'cross', hardness: 0, solid: false, slow: 0.5, drops: () => [['sweet_berries', 1 + Math.floor(Math.random() * 2)]], sound: 'grass' });
+block('crimson_stem', 'Tallo carmesí', { tex: T('crimson_stem_top', 'crimson_stem'), hardness: 2, tool: 'axe', sound: 'wood' });
+block('warped_stem', 'Tallo distorsionado', { tex: T('warped_stem_top', 'warped_stem'), hardness: 2, tool: 'axe', sound: 'wood' });
+block('crimson_planks', 'Tablones carmesí', { hardness: 2, tool: 'axe', sound: 'wood' });
+block('warped_planks', 'Tablones distorsionados', { hardness: 2, tool: 'axe', sound: 'wood' });
+block('warped_nylium', 'Necilio distorsionado', { tex: T('warped_nylium', 'warped_nylium_side', 'netherrack'), hardness: 0.4, tool: 'pickaxe', needsTool: true, drops: 'netherrack' });
+block('warped_wart_block', 'Bloque de verruga distorsionada', { hardness: 1, tool: 'hoe', sound: 'wood' });
+block('crimson_fungus', 'Hongo carmesí', { render: 'cross', hardness: 0, sound: 'grass' });
+block('warped_fungus', 'Hongo distorsionado', { render: 'cross', hardness: 0, sound: 'grass' });
+block('crimson_roots', 'Raíces carmesí', { render: 'cross', hardness: 0, replaceable: true, drops: null, sound: 'grass' });
+block('warped_roots', 'Raíces distorsionadas', { render: 'cross', hardness: 0, replaceable: true, drops: null, sound: 'grass' });
+block('bone_block', 'Bloque de hueso', { tex: T('bone_block_top', 'bone_block'), hardness: 2, tool: 'pickaxe', needsTool: true });
+block('end_rod', 'Vara del End', { tex: 'end_rod', render: 'box', box: [7, 0, 7, 9, 16, 9], opaque: false, solid: false, hardness: 0, light: 14 });
+block('chorus_plant', 'Planta de coro', { render: 'box', box: [3, 0, 3, 13, 16, 13], opaque: false, hardness: 0.4, tool: 'axe', drops: () => (Math.random() < 0.5 ? [['chorus_fruit', 1]] : []) });
+block('chorus_flower', 'Flor de coro', { hardness: 0.4, tool: 'axe' });
+block('purpur_pillar', 'Pilar de púrpur', { tex: T('purpur_pillar_top', 'purpur_pillar'), hardness: 1.5, tool: 'pickaxe', needsTool: true });
+block('gilded_blackstone', 'Piedra negra dorada', { hardness: 1.5, tool: 'pickaxe', needsTool: true, drops: () => [[Math.random() < 0.1 ? 'gold_nugget' : 'gilded_blackstone', Math.random() < 0.1 ? 2 + Math.floor(Math.random() * 4) : 1]] });
+block('polished_blackstone_bricks', 'Ladrillos de piedra negra pulida', { hardness: 1.5, tool: 'pickaxe', needsTool: true });
+block('cobbled_deepslate', 'Pizarra profunda rocosa', { hardness: 3.5, tool: 'pickaxe', needsTool: true });
+block('deepslate', 'Pizarra profunda', { tex: T('deepslate_top', 'deepslate'), hardness: 3, tool: 'pickaxe', needsTool: true, drops: 'cobbled_deepslate' });
+block('deepslate_diamond_ore', 'Mena de diamante de pizarra profunda', { hardness: 4.5, tool: 'pickaxe', needsTool: true, level: 2, drops: 'diamond' });
+block('deepslate_iron_ore', 'Mena de hierro de pizarra profunda', { hardness: 4.5, tool: 'pickaxe', needsTool: true, level: 1, drops: 'raw_iron' });
+block('deepslate_gold_ore', 'Mena de oro de pizarra profunda', { hardness: 4.5, tool: 'pickaxe', needsTool: true, level: 2, drops: 'raw_gold' });
+block('deepslate_redstone_ore', 'Mena de redstone de pizarra profunda', { hardness: 4.5, tool: 'pickaxe', needsTool: true, level: 2, drops: () => [['redstone', 4 + Math.floor(Math.random() * 2)]] });
+block('deepslate_lapis_ore', 'Mena de lapislázuli de pizarra profunda', { hardness: 4.5, tool: 'pickaxe', needsTool: true, level: 1, drops: () => [['lapis_lazuli', 4 + Math.floor(Math.random() * 6)]] });
+block('amethyst_block', 'Bloque de amatista', { hardness: 1.5, tool: 'pickaxe', sound: 'glass' });
+block('amethyst_cluster', 'Racimo de amatista', { render: 'cross', hardness: 1.5, tool: 'pickaxe', light: 5, drops: () => [['amethyst_shard', 4]], sound: 'glass' });
+block('calcite', 'Calcita', { hardness: 0.75, tool: 'pickaxe', needsTool: true });
+block('smooth_basalt', 'Basalto liso', { hardness: 1.25, tool: 'pickaxe', needsTool: true });
+block('sculk', 'Sculk', { hardness: 0.2, tool: 'hoe', sound: 'wool' });
 block('spawner', 'Generador de monstruos', { render: 'cube', pass: 'cutout', opaque: false, hardness: 5, tool: 'pickaxe', needsTool: true, drops: null, light: 0 });
 block('path', 'Camino de tierra', { tex: T('path_top', 'path_side', 'dirt'), render: 'box', box: [0, 0, 0, 16, 15, 16], pass: 'opaque', opaque: false, hardness: 0.65, tool: 'shovel', drops: 'dirt', sound: 'grass' });
 block('fire', 'Fuego', { render: 'cross', solid: false, opaque: false, hardness: 0, noItem: true, drops: null, light: 15, replaceable: true });
 
 
 // ---------------------------------------------------------------- items
-let nextItemId = 256;
+let nextItemId = BLOCK_LIMIT;
 function item(name, display, p = {}) {
   const id = nextItemId++;
   const def = { id, name, display, stack: p.stack ?? 64, kind: p.kind ?? 'item', ...p };
@@ -257,12 +356,38 @@ item('bucket', 'Cubo', { stack: 16 });
 item('water_bucket', 'Cubo de agua', { stack: 1 });
 item('lava_bucket', 'Cubo de lava', { stack: 1 });
 item('milk_bucket', 'Cubo de leche', { stack: 1, food: [0, 0], milk: true });
+item('glass_bottle', 'Frasco de cristal');
+item('amethyst_shard', 'Fragmento de amatista');
+item('chorus_fruit', 'Fruta de coro', { food: [4, 2.4], chorus: true });
+item('popped_chorus_fruit', 'Fruta de coro reventada');
+item('wither_skeleton_skull', 'Cráneo calcinado', { stack: 64 });
+item('nether_star', 'Estrella del coloso');
+item('enchanted_golden_apple', 'Manzana dorada encantada', { food: [4, 9.6] });
+item('shulker_shell', 'Fragmento de centinela');
+item('prismarine_shard', 'Escama abisal');
+item('honeycomb', 'Panal');
+item('rabbit_hide', 'Piel de conejo');
+item('goat_horn', 'Cuerno de cabra', { stack: 1 });
+for (const [w, n] of [['oak', 'roble'], ['spruce', 'abeto'], ['birch', 'abedul'], ['jungle', 'jungla'], ['acacia', 'acacia']]) item(`${w}_boat`, `Barca de ${n}`, { stack: 1, boat: w });
+item('minecart', 'Vagoneta', { stack: 1 });
+item('fishing_rod', 'Caña de pescar', { kind: 'tool', stack: 1, toolType: 'rod', durability: 64, damage: 1 });
+item('elytra', 'Élitros', { kind: 'armor', stack: 1, slot: 1, armor: 0, durability: 432 });
+item('firework_rocket', 'Cohete de fuegos artificiales');
+item('carrot_on_a_stick', 'Caña con zanahoria', { kind: 'tool', stack: 1, toolType: 'carrot_stick', durability: 25 });
+item('lead', 'Rienda');
+item('potion', 'Poción', { stack: 1, kind: 'potion' });
+item('splash_potion', 'Poción arrojadiza', { stack: 1, kind: 'potion', splash: true });
+item('experience_bottle', 'Frasco de experiencia');
+item('enchanted_book', 'Libro encantado', { stack: 1 });
+item('name_tag', 'Etiqueta');
+for (const [n, d] of [['nether_wart', 'Verruga del Nether'], ['spider_eye', 'Ojo de araña'], ['fermented_spider_eye', 'Ojo de araña fermentado'], ['glistering_melon_slice', 'Rodaja de sandía reluciente'], ['magma_cream', 'Crema de magma'], ['rabbit_foot', 'Pata de conejo'], ['phantom_membrane', 'Membrana espectral'], ['turtle_scute', 'Escama de tortuga'], ['lapis_dummy', 'x']]) if (n !== 'lapis_dummy') item(n, d);
+item('golden_carrot', 'Zanahoria dorada', { food: [6, 14.4] });
 const FOOD = [
   ['apple', 'Manzana', 4, 2.4], ['golden_apple', 'Manzana dorada', 4, 9.6], ['bread', 'Pan', 5, 6], ['porkchop', 'Chuleta de cerdo cruda', 3, 1.8],
   ['cooked_porkchop', 'Chuleta de cerdo cocinada', 8, 12.8], ['beef', 'Filete crudo', 3, 1.8], ['cooked_beef', 'Filete', 8, 12.8],
   ['chicken', 'Pollo crudo', 2, 1.2], ['cooked_chicken', 'Pollo asado', 6, 7.2], ['mutton', 'Cordero crudo', 2, 1.2], ['cooked_mutton', 'Cordero asado', 6, 9.6],
   ['rotten_flesh', 'Carne podrida', 4, 0.8], ['carrot', 'Zanahoria', 3, 3.6], ['potato', 'Patata', 1, 0.6], ['baked_potato', 'Patata asada', 5, 6],
-  ['melon_slice', 'Rodaja de sandía', 2, 1.2], ['mushroom_stew', 'Estofado de champiñones', 6, 7.2],
+  ['melon_slice', 'Rodaja de sandía', 2, 1.2], ['cod', 'Bacalao crudo', 2, 0.4], ['cooked_cod', 'Bacalao asado', 5, 6], ['salmon', 'Salmón crudo', 2, 0.4], ['cooked_salmon', 'Salmón asado', 6, 9.6], ['tropical_fish', 'Pez tropical', 1, 0.2], ['pufferfish', 'Pez globo', 1, 0.2], ['rabbit', 'Conejo crudo', 3, 1.8], ['cooked_rabbit', 'Conejo asado', 5, 6], ['cookie', 'Galleta', 2, 0.4], ['pumpkin_pie', 'Pastel de calabaza', 8, 4.8], ['sweet_berries', 'Bayas dulces', 2, 0.4], ['dried_kelp', 'Alga seca', 1, 0.6], ['beetroot', 'Remolacha', 1, 1.2], ['honey_bottle', 'Frasco de miel', 6, 1.2], ['mushroom_stew', 'Estofado de champiñones', 6, 7.2],
 ];
 for (const [n, d, h, s] of FOOD) item(n, d, { food: [h, s], stack: n === 'mushroom_stew' ? 1 : 64 });
 const MOB_N = {
@@ -274,13 +399,19 @@ for (const m of Object.keys(SPAWN_EGG_COLORS)) item(`${m}_spawn_egg`, `Huevo gen
 
 // helpers
 export function itemDef(id) { return ITEMS[id]; }
-export function isBlockItem(id) { return id < 256 && !!BLOCKS[id]; }
+export function isBlockItem(id) { return id < BLOCK_LIMIT && !!BLOCKS[id]; }
 export function maxStack(id) { return ITEMS[id]?.stack ?? 64; }
+// Two stacks can merge when same item, undamaged and with identical extra data (enchantments, potion, name)
+export function sameKind(a, b) {
+  if (!a || !b || a.id !== b.id || a.dmg || b.dmg) return false;
+  return JSON.stringify(a.data ?? null) === JSON.stringify(b.data ?? null);
+}
+export function copyStack(s, count = s?.count) { return s ? { id: s.id, count, dmg: s.dmg ?? 0, ...(s.data ? { data: JSON.parse(JSON.stringify(s.data)) } : {}) } : null; }
 
 // ---------------------------------------------------------------- recipes
 const TAGS = {
-  planks: ['oak_planks', 'spruce_planks', 'birch_planks', 'jungle_planks', 'acacia_planks'],
-  log: ['oak_log', 'spruce_log', 'birch_log', 'jungle_log', 'acacia_log'],
+  planks: ['oak_planks', 'spruce_planks', 'birch_planks', 'jungle_planks', 'acacia_planks', 'dark_oak_planks', 'cherry_planks', 'mangrove_planks', 'crimson_planks', 'warped_planks'],
+  log: ['oak_log', 'spruce_log', 'birch_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'cherry_log', 'mangrove_log'],
   wool: Object.keys(WOOL_COLORS).map((c) => c + '_wool'),
   coals: ['coal', 'charcoal'],
   stone_mat: ['cobblestone', 'blackstone'],
@@ -317,7 +448,6 @@ for (const [m, mat] of Object.entries(ARMOR_MAT)) {
   shaped(`${m}_leggings`, 1, ['###', '# #', '# #'], { '#': mat });
   shaped(`${m}_boots`, 1, ['# #', '# #'], { '#': mat });
 }
-for (const t of ['sword', 'pickaxe', 'axe', 'shovel', 'hoe', 'helmet', 'chestplate', 'leggings', 'boots']) shapeless(`netherite_${t}`, 1, [`diamond_${t}`, 'netherite_ingot']);
 shapeless('netherite_ingot', 1, ['netherite_scrap', 'netherite_scrap', 'netherite_scrap', 'netherite_scrap', 'gold_ingot', 'gold_ingot', 'gold_ingot', 'gold_ingot']);
 shaped('furnace', 1, ['###', '# #', '###'], { '#': '#stone_mat' });
 shaped('chest', 1, ['###', '# #', '###'], { '#': '#planks' });
@@ -362,6 +492,65 @@ shaped('nether_brick_fence', 6, ['###', '###'], { '#': 'nether_bricks' });
 shaped('glass_pane', 16, ['###', '###'], { '#': 'glass' });
 shaped('iron_bars', 16, ['###', '###'], { '#': 'iron_ingot' });
 shaped('lantern', 1, ['nnn', 'ntn', 'nnn'], { n: 'iron_nugget', t: 'torch' });
+shaped('redstone_torch', 1, ['r', 's'], { r: 'redstone', s: 'stick' });
+shaped('lever', 1, ['s', 'c'], { s: 'stick', c: 'cobblestone' });
+shaped('stone_button', 1, ['s'], { s: 'stone' });
+shaped('oak_button', 1, ['p'], { p: 'oak_planks' });
+shaped('stone_pressure_plate', 1, ['ss'], { s: 'stone' });
+shaped('oak_pressure_plate', 1, ['pp'], { p: 'oak_planks' });
+shaped('repeater', 1, ['trt', 'sss'], { t: 'redstone_torch', r: 'redstone', s: 'stone' });
+shaped('comparator', 1, [' t ', 'tqt', 'sss'], { t: 'redstone_torch', q: 'quartz', s: 'stone' });
+shaped('redstone_lamp', 1, [' r ', 'rgr', ' r '], { r: 'redstone', g: 'glowstone' });
+shaped('piston', 1, ['ppp', 'cic', 'crc'], { p: '#planks', c: 'cobblestone', i: 'iron_ingot', r: 'redstone' });
+shaped('sticky_piston', 1, ['s', 'p'], { s: 'slime_ball', p: 'piston' });
+shaped('observer', 1, ['ccc', 'rrq', 'ccc'], { c: 'cobblestone', r: 'redstone', q: 'quartz' });
+shaped('dispenser', 1, ['ccc', 'cbc', 'crc'], { c: 'cobblestone', b: 'bow', r: 'redstone' });
+shaped('dropper', 1, ['ccc', 'c c', 'crc'], { c: 'cobblestone', r: 'redstone' });
+shaped('hopper', 1, ['i i', 'ici', ' i '], { i: 'iron_ingot', c: 'chest' });
+shaped('note_block', 1, ['ppp', 'prp', 'ppp'], { p: '#planks', r: 'redstone' });
+shaped('daylight_detector', 1, ['ggg', 'qqq', 'sss'], { g: 'glass', q: 'quartz', s: 'oak_slab' });
+shaped('target', 1, [' r ', 'rhr', ' r '], { r: 'redstone', h: 'hay_block' });
+shaped('iron_door', 3, ['ii', 'ii', 'ii'], { i: 'iron_ingot' });
+shaped('enchanting_table', 1, [' b ', 'dod', 'ooo'], { b: 'book', d: 'diamond', o: 'obsidian' });
+shaped('anvil', 1, ['BBB', ' i ', 'iii'], { B: 'iron_block', i: 'iron_ingot' });
+shaped('brewing_stand', 1, [' r ', 'ccc'], { r: 'blaze_rod', c: '#stone_mat' });
+shaped('cauldron', 1, ['i i', 'i i', 'iii'], { i: 'iron_ingot' });
+shaped('grindstone', 1, ['sSs', 'p p'], { s: 'stick', S: 'stone_slab', p: '#planks' });
+shaped('smithing_table', 1, ['ii', 'pp', 'pp'], { i: 'iron_ingot', p: '#planks' });
+shaped('stonecutter', 1, [' i ', 'sss'], { i: 'iron_ingot', s: 'stone' });
+shaped('loom', 1, ['ss', 'pp'], { s: 'string', p: '#planks' });
+shaped('cartography_table', 1, ['aa', 'pp', 'pp'], { a: 'paper', p: '#planks' });
+shaped('fletching_table', 1, ['ff', 'pp', 'pp'], { f: 'flint', p: '#planks' });
+shaped('smoker', 1, [' l ', 'lfl', ' l '], { l: '#log', f: 'furnace' });
+shaped('blast_furnace', 1, ['iii', 'ifi', 'sss'], { i: 'iron_ingot', f: 'furnace', s: 'smooth_stone' });
+shaped('barrel', 1, ['psp', 'p p', 'psp'], { p: '#planks', s: 'oak_slab' });
+shaped('composter', 1, ['s s', 's s', 'sss'], { s: 'oak_slab' });
+shaped('lectern', 1, ['sss', ' b ', ' s '], { s: 'oak_slab', b: 'bookshelf' });
+shaped('glass_bottle', 3, ['g g', ' g '], { g: 'glass' });
+for (const w of ['dark_oak', 'cherry', 'mangrove']) shapeless(`${w}_planks`, 4, [`${w}_log`]);
+shapeless('crimson_planks', 4, ['crimson_stem']); shapeless('warped_planks', 4, ['warped_stem']);
+shaped('mud_bricks', 4, ['mm', 'mm'], { m: 'mud' });
+shaped('red_sandstone', 1, ['ss', 'ss'], { s: 'red_sand' });
+shaped('bone_block', 1, ['bbb', 'bbb', 'bbb'], { b: 'bone_meal' }); shapeless('bone_meal', 9, ['bone_block']);
+shaped('end_rod', 4, ['b', 'p'], { b: 'blaze_rod', p: 'popped_chorus_fruit' });
+shaped('amethyst_block', 1, ['aa', 'aa'], { a: 'amethyst_shard' });
+shaped('purpur_block', 4, ['pp', 'pp'], { p: 'popped_chorus_fruit' });
+for (const w of ['oak', 'spruce', 'birch', 'jungle', 'acacia']) shaped(`${w}_boat`, 1, ['p p', 'ppp'], { p: `${w}_planks` });
+shaped('minecart', 1, ['i i', 'iii'], { i: 'iron_ingot' });
+shaped('rail', 16, ['i i', 'isi', 'i i'], { i: 'iron_ingot', s: 'stick' });
+shaped('powered_rail', 6, ['g g', 'gsg', 'grg'], { g: 'gold_ingot', s: 'stick', r: 'redstone' });
+shaped('detector_rail', 6, ['i i', 'ipi', 'iri'], { i: 'iron_ingot', p: 'stone_pressure_plate', r: 'redstone' });
+shaped('activator_rail', 6, ['isi', 'iti', 'isi'], { i: 'iron_ingot', s: 'stick', t: 'redstone_torch' });
+shaped('fishing_rod', 1, ['  s', ' sx', 's x'], { s: 'stick', x: 'string' });
+shapeless('firework_rocket', 3, ['paper', 'gunpowder']);
+shapeless('carrot_on_a_stick', 1, ['fishing_rod', 'carrot']);
+shaped('lead', 2, ['ss ', 'sb ', '  s'], { s: 'string', b: 'slime_ball' });
+shapeless('pumpkin_pie', 1, ['pumpkin', 'sugar', 'egg']);
+shapeless('fermented_spider_eye', 1, ['spider_eye', 'brown_mushroom', 'sugar']);
+shaped('glistering_melon_slice', 1, ['nnn', 'nmn', 'nnn'], { n: 'gold_nugget', m: 'melon_slice' });
+shapeless('magma_cream', 1, ['blaze_powder', 'slime_ball']);
+shaped('golden_carrot', 1, ['nnn', 'ncn', 'nnn'], { n: 'gold_nugget', c: 'carrot' });
+shaped('name_tag', 1, [' s', 'p '], { s: 'string', p: 'paper' });
 shaped('ladder', 3, ['s s', 'sss', 's s'], { s: 'stick' });
 shapeless('jack_o_lantern', 1, ['pumpkin', 'torch']);
 shapeless('bone_meal', 3, ['bone']);
@@ -422,11 +611,14 @@ export function matchRecipe(grid, n) {
   return null;
 }
 
+export const SMOKER_OK = new Set(['porkchop', 'beef', 'chicken', 'mutton', 'potato', 'cod', 'salmon', 'rabbit', 'kelp']);
 export const SMELTING = {
   raw_iron: 'iron_ingot', raw_gold: 'gold_ingot', raw_copper: 'copper_ingot', iron_ore: 'iron_ingot', gold_ore: 'gold_ingot', copper_ore: 'copper_ingot',
   sand: 'glass', red_sand: 'glass', cobblestone: 'stone', stone: 'smooth_stone', clay_ball: 'brick', clay: 'terracotta', netherrack: 'nether_brick',
   oak_log: 'charcoal', spruce_log: 'charcoal', birch_log: 'charcoal', jungle_log: 'charcoal', acacia_log: 'charcoal',
   porkchop: 'cooked_porkchop', beef: 'cooked_beef', chicken: 'cooked_chicken', mutton: 'cooked_mutton', potato: 'baked_potato',
+  chorus_fruit: 'popped_chorus_fruit', cobbled_deepslate: 'deepslate', deepslate_diamond_ore: 'diamond', deepslate_iron_ore: 'iron_ingot', deepslate_gold_ore: 'gold_ingot', mud: 'mud_bricks',
+  cod: 'cooked_cod', salmon: 'cooked_salmon', rabbit: 'cooked_rabbit', kelp: 'dried_kelp',
   nether_quartz_ore: 'quartz', diamond_ore: 'diamond', emerald_ore: 'emerald', coal_ore: 'coal', lapis_ore: 'lapis_lazuli', ancient_debris: 'netherite_scrap',
 };
 
