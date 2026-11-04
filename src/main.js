@@ -10,6 +10,7 @@ import { UI, escapeHtml } from './ui.js';
 import { tileCanvas, atlasCanvas } from './textures.js';
 import { playSound, audio, unlockAudio, startMusic } from './audio.js';
 import { hashString } from './noise.js';
+import { TouchControls, IS_TOUCH } from './touch.js';
 
 const $ = (s) => document.querySelector(s);
 const TPS = 20;
@@ -19,7 +20,9 @@ class Game {
   constructor() {
     this.canvas = $('#game');
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: false, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.touch = IS_TOUCH;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.touch ? 1 : 1.5));
+    if (this.touch) document.body.classList.add('touch');
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.autoClear = false;
     this.scene = new THREE.Scene();
@@ -52,6 +55,7 @@ class Game {
     this.buildSky();
     this.buildHelpers();
     this.ui = new UI(this);
+    this.touchControls = this.touch ? new TouchControls(this) : null;
     this.bindInput();
     window.addEventListener('resize', () => this.resize());
     this.resize();
@@ -254,7 +258,7 @@ class Game {
     this.ui.root.classList.add('hidden'); this.ui.root.innerHTML = '';
     this.hud(true);
     this.ui.refresh();
-    this.ui.chat(fresh ? `Bienvenido a "${meta.name}". Pulsa E para el inventario, T para el chat, F3 para depurar.` : `Mundo "${meta.name}" cargado.`);
+    this.ui.chat(fresh ? (this.touch ? `Bienvenido a "${meta.name}". Joystick para moverte, arrastra para mirar, toca para usar/colocar y mantén para romper.` : `Bienvenido a "${meta.name}". Pulsa E para el inventario, T para el chat, F3 para depurar.`) : `Mundo "${meta.name}" cargado.`);
     this.lockPointer();
     this.saveTimer = 0;
     startMusic(() => this.options.volume);
@@ -791,8 +795,17 @@ class Game {
       this.ignoreUnlock = false;
     });
   }
-  lockPointer() { try { const r = this.canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch { /* not supported */ } }
-  releasePointer() { if (document.pointerLockElement) { this.ignoreUnlock = true; document.exitPointerLock(); } }
+  itemDef(id) { return ITEMS[id]; }
+  lockPointer() {
+    if (this.touch) { this.locked = true; this.requestFullscreen(); return; }
+    try { const r = this.canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch { /* not supported */ } }
+  requestFullscreen() {
+    if (this.fsTried || document.fullscreenElement) return;
+    this.fsTried = true;
+    const el = document.documentElement;
+    try { const r = el.requestFullscreen?.({ navigationUI: 'hide' }); r?.then?.(() => screen.orientation?.lock?.('landscape').catch(() => {})).catch(() => {}); } catch { /* not supported */ }
+  }
+  releasePointer() { if (this.touch) { this.locked = false; return; } if (document.pointerLockElement) { this.ignoreUnlock = true; document.exitPointerLock(); } }
 
   onMouse(button, down) {
     const p = this.player;
@@ -865,6 +878,7 @@ class Game {
   }
 
   input() {
+    if (this.touchControls) return this.touchControls.input();
     const k = this.keys;
     return {
       forward: k.KeyW, back: k.KeyS, left: k.KeyA, right: k.KeyD, jump: k.Space,
@@ -1221,6 +1235,7 @@ class Game {
       if (Math.random() < dt * 4) this.ui.refresh();
       this.ui.updateHUD(dt);
     }
+    if (this.touchControls) this.touchControls.show(this.running && !!this.player && !this.ui.isOpen() && !this.hideHud);
     if (this.panorama) this.time = 3000;
     this.particles.update(dt);
     this.loadChunksAround();
@@ -1370,7 +1385,7 @@ function drawLogo(c) {
 
 // ---------------------------------------------------------------- storage helpers
 function loadOptions() {
-  const def = { fov: 70, renderDistance: 6, sensitivity: 100, volume: 60, guiScale: 2, difficulty: 'normal', bobbing: true, clouds: true };
+  const def = { fov: 70, renderDistance: IS_TOUCH ? 4 : 6, sensitivity: 100, volume: 60, guiScale: IS_TOUCH ? (Math.min(innerWidth, innerHeight) < 500 ? 1.5 : 2) : 2, difficulty: 'normal', bobbing: true, clouds: !IS_TOUCH };
   try { return { ...def, ...JSON.parse(localStorage.getItem('mc_options') || '{}') }; } catch { return def; }
 }
 function listWorlds() { try { return JSON.parse(localStorage.getItem('mc_worlds') || '[]').sort((a, b) => b.lastPlayed - a.lastPlayed); } catch { return []; } }

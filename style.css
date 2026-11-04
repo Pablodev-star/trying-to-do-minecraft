@@ -145,3 +145,28 @@ img { image-rendering: pixelated; }
 .loading-fill { height: 100%; width: 60%; background: #80ff20; animation: load 1.2s ease-in-out infinite alternate; }
 @keyframes load { from { width: 10%; } to { width: 95%; } }
 @media (max-width: 700px) { :root { --s: 1.5; } }
+
+/* ---------- touch controls (phones / tablets) */
+body.touch, body.touch canvas#game { touch-action: none; -webkit-touch-callout: none; overscroll-behavior: none; }
+body.touch #ui { touch-action: manipulation; }
+body.touch #hotbar { pointer-events: auto; }
+#touch { position: fixed; inset: 0; pointer-events: none; z-index: 5; font-family: inherit; }
+#touch > * { pointer-events: auto; }
+.t-joy { position: absolute; left: calc(24px + env(safe-area-inset-left)); bottom: 28px; width: 132px; height: 132px; border-radius: 50%; background: rgba(255,255,255,0.12); border: 2px solid rgba(255,255,255,0.35); touch-action: none; }
+.t-joy-knob { position: absolute; left: 50%; top: 50%; width: 58px; height: 58px; border-radius: 50%; background: rgba(255,255,255,0.45); border: 2px solid rgba(255,255,255,0.7); transform: translate(-50%, -50%); pointer-events: none; }
+.t-btn { position: absolute; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: bold; font-size: 20px; background: rgba(0,0,0,0.35); border: 2px solid rgba(255,255,255,0.45); border-radius: 10px; text-shadow: 1px 1px 0 #000; touch-action: none; user-select: none; -webkit-user-select: none; }
+.t-btn.on { background: rgba(255,255,255,0.4); }
+.t-jump { right: calc(28px + env(safe-area-inset-right)); bottom: 56px; width: 72px; height: 72px; border-radius: 50%; }
+.t-sneak { right: calc(116px + env(safe-area-inset-right)); bottom: 30px; width: 56px; height: 56px; border-radius: 50%; font-size: 16px; }
+.t-top { position: absolute; top: calc(8px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right)); display: flex; gap: 6px; }
+.t-btn.small { position: static; width: 44px; height: 36px; font-size: 13px; }
+body.touch #crosshair { width: calc(12px * var(--s)); height: calc(12px * var(--s)); }
+body.touch #chat { bottom: auto; top: calc(52px + env(safe-area-inset-top)); width: min(60vw, 420px); }
+.touch-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: calc(4px * var(--s)); }
+.touch-bar .mc-btn.on { color: #ffffa0; background: #4a6a2a; }
+.touch-hint { color: #404040; font-size: calc(6px * var(--s)); font-weight: normal; text-shadow: none; }
+body.touch .creative-grid { -webkit-overflow-scrolling: touch; touch-action: pan-y; }
+body.touch .slot:hover::after { display: none; }
+@media (orientation: portrait) and (pointer: coarse) {
+  body.touch::after { content: 'Gira el dispositivo para jugar mejor en horizontal'; position: fixed; left: 50%; top: 40%; transform: translateX(-50%); background: rgba(0,0,0,0.6); padding: 8px 12px; font-size: 14px; z-index: 3; pointer-events: none; white-space: nowrap; }
+}
