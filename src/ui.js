@@ -336,7 +336,14 @@ export class UI {
           clearTimeout(this.pressTimer);
           this.pressFired = false;
           this.pressTimer = setTimeout(() => { this.pressFired = true; this.clickSlot(i, 2, this.quickMove); }, 380);
-          d.addEventListener('pointerup', () => { clearTimeout(this.pressTimer); if (!this.pressFired) this.clickSlot(i, 0, this.quickMove); }, { once: true });
+          const sx = e.clientX, sy = e.clientY;
+          const done = () => { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', cancel); };
+          const up = () => { clearTimeout(this.pressTimer); done(); if (!this.pressFired) this.clickSlot(i, 0, this.quickMove); };
+          const cancel = () => { clearTimeout(this.pressTimer); this.pressFired = true; done(); }; // finger dragged: it's a scroll
+          const move = (ev) => { if (ev.pointerId === e.pointerId && Math.hypot(ev.clientX - sx, ev.clientY - sy) > 6) cancel(); };
+          document.addEventListener('pointermove', move);
+          document.addEventListener('pointerup', up);
+          document.addEventListener('pointercancel', cancel);
           return;
         }
         this.clickSlot(i, e.button, e.shiftKey);

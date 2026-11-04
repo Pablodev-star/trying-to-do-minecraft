@@ -147,7 +147,8 @@ img { image-rendering: pixelated; }
 @media (max-width: 700px) { :root { --s: 1.5; } }
 
 /* ---------- touch controls (phones / tablets) */
-body.touch, body.touch canvas#game { touch-action: none; -webkit-touch-callout: none; overscroll-behavior: none; }
+body.touch { -webkit-touch-callout: none; overscroll-behavior: none; }
+body.touch canvas#game, #touch .t-joy, #touch .t-btn, body.touch #hotbar { touch-action: none; }
 body.touch #ui { touch-action: manipulation; }
 body.touch #hotbar { pointer-events: auto; }
 #touch { position: fixed; inset: 0; pointer-events: none; z-index: 5; font-family: inherit; }

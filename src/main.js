@@ -55,7 +55,12 @@ class Game {
     this.buildSky();
     this.buildHelpers();
     this.ui = new UI(this);
-    this.touchControls = this.touch ? new TouchControls(this) : null;
+    this.touchControls = IS_TOUCH ? new TouchControls(this) : null;
+    // On hybrid devices (touchscreen laptop, tablet + keyboard) follow the input actually in use.
+    if (this.touchControls) {
+      document.addEventListener('pointerdown', (e) => this.setTouchMode(e.pointerType === 'touch'), true);
+      document.addEventListener('keydown', (e) => { if (/^(Key[WASDE]|Space|Shift|Control|Digit)/.test(e.code) && document.activeElement?.tagName !== 'INPUT') this.setTouchMode(false); }, true);
+    }
     this.bindInput();
     window.addEventListener('resize', () => this.resize());
     this.resize();
@@ -770,6 +775,7 @@ class Game {
     document.addEventListener('keyup', (e) => this.onKey(e, false));
     this.canvas.addEventListener('mousedown', (e) => {
       unlockAudioOnce();
+      if (this.touch) return; // touches are handled by TouchControls
       if (!this.running || this.ui.isOpen()) return;
       if (!this.locked) { this.lockPointer(); return; }
       this.onMouse(e.button, true);
@@ -796,6 +802,14 @@ class Game {
     });
   }
   itemDef(id) { return ITEMS[id]; }
+  setTouchMode(on) {
+    if (on === this.touch) return;
+    this.touch = on;
+    document.body.classList.toggle('touch', on);
+    if (on) { if (document.pointerLockElement) { this.ignoreUnlock = true; document.exitPointerLock(); } if (this.running && !this.ui.isOpen()) this.locked = true; }
+    else if (!document.pointerLockElement) this.locked = false; // next click requests real pointer lock
+    if (this.ui.screen) this.ui.renderScreen();
+  }
   lockPointer() {
     if (this.touch) { this.locked = true; this.requestFullscreen(); return; }
     try { const r = this.canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch { /* not supported */ } }
@@ -878,7 +892,7 @@ class Game {
   }
 
   input() {
-    if (this.touchControls) return this.touchControls.input();
+    if (this.touchControls && this.touch) return this.touchControls.input();
     const k = this.keys;
     return {
       forward: k.KeyW, back: k.KeyS, left: k.KeyA, right: k.KeyD, jump: k.Space,
@@ -1235,7 +1249,7 @@ class Game {
       if (Math.random() < dt * 4) this.ui.refresh();
       this.ui.updateHUD(dt);
     }
-    if (this.touchControls) this.touchControls.show(this.running && !!this.player && !this.ui.isOpen() && !this.hideHud);
+    if (this.touchControls) this.touchControls.show(this.touch && this.running && !!this.player && !this.ui.isOpen() && !this.hideHud);
     if (this.panorama) this.time = 3000;
     this.particles.update(dt);
     this.loadChunksAround();
