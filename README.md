@@ -80,6 +80,17 @@ En el inventario: clic izquierdo para coger o dejar, clic derecho para la mitad 
 - **Bloques nuevos**: losas (dos losas forman un bloque), escaleras (también invertidas), vallas que se conectan, paneles de cristal, barrotes de hierro, farol, camino de tierra, antorchas en la pared, puertas de dos bloques que se abren y camas de dos bloques.
 - Texturas animadas de agua, lava y portal; cielo con degradado.
 
+## Contenido añadido en la gran ampliación
+
+- **Encantamientos**: mesa de encantamientos (con estanterías), 26 encantamientos con efecto real, libros encantados, yunque (reparar, combinar, renombrar), afiladora y mesa de herrería (mejora a netherita).
+- **Pociones y efectos**: soporte para pociones con todo el árbol de recetas (rara, prolongada, potenciada, corrupta, arrojadiza), caldero, frascos de experiencia y más de 20 efectos de estado visibles en el HUD.
+- **Aldeanos**: 13 profesiones con su bloque de trabajo, 5 niveles con comercios nuevos, existencias que se reponen, precios con demanda y reputación (descuentos o precios altos), zombis aldeanos que se pueden curar.
+- **Redstone**: polvo (0-15), antorchas inversoras, palancas, botones, placas de presión, repetidores, comparadores, lámparas, pistones normales y pegajosos, observadores, dispensadores, soltadores, tolvas, bloques musicales, sensor de luz, diana, puertas de hierro y dinamita activable.
+- **Vehículos y más**: barcas, vagonetas con raíles (propulsores, detectores, activadores), montar caballos y cerdos, élitros con cohetes y caña de pescar con botín.
+- **Mundo**: bosque oscuro, cerezos, campos de hongos, badlands, manglar, picos de hielo, océanos cálido y helado; en el Nether, bosques carmesí y distorsionado, valle de almas y deltas de basalto; pizarra profunda y geodas de amatista.
+- **Estructuras**: templos del desierto y la jungla, iglús, cabañas de bruja, barcos hundidos, portales en ruinas, torres de bandidos, minas abandonadas, bastiones, fortalezas ampliadas y ciudades del End con élitros.
+- **Mobs**: zorros, conejos, gatos, loros, pandas, abejas, cabras, ranas, tortugas, osos polares, llamas, calamares, peces y delfines; variantes de zombi y esqueleto; y criaturas de diseño propio: espectro nocturno, bandidos, anguila abisal, centinela de púrpur, trasgo de ceniza (trueque de oro), jabalí infernal, zancudo de lava, esqueleto calcinado y el jefe **Coloso de ceniza** (arena de almas en T + 3 cráneos calcinados).
+
 ## Comandos (requieren trucos activados)
 
 `/gamemode`, `/time set`, `/weather`, `/tp`, `/give`, `/summon`, `/kill`, `/xp`, `/difficulty`, `/spawnpoint`, `/locate [village]`, `/setblock`, `/clear`, `/heal`, `/dimension`, `/gamerule keepInventory true`, `/seed`, `/help`

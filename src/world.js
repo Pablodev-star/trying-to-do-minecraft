@@ -65,6 +65,7 @@ const FACES = [
 const FRONT_FACE = [4, 1, 5, 0];
 const AO_CURVE = [0.45, 0.62, 0.8, 1.0];
 let UVROT = 0;
+const WHITE = [1, 1, 1];
 const wireTint = [1, 0, 0];
 
 // facing6 meta -> face index of the front (0 +x, 1 -x, 2 +y, 3 -y, 4 +z, 5 -z)
@@ -697,8 +698,9 @@ function emitFace(buf, F, x, y, z, tex, tint, getP, getL, box, noAO = false, fla
   const [x0, y0, z0, x1, y1, z1] = box;
   const n = F.n;
   const base = buf.pos.length / 3;
-  const ao = [];
-  const lights = [];
+  const ax0 = F.ax0 ?? (F.ax0 = [0, 1, 2].filter((a) => n[a] === 0)[0]), ax1 = F.ax1 ?? (F.ax1 = [0, 1, 2].filter((a) => n[a] === 0)[1]);
+  const t = tint ?? WHITE;
+  let ao0 = 0, ao1 = 0, ao2 = 0, ao3 = 0;
   // light from the cell in front of the face (or own cell when inset)
   const inset = (n[0] === 1 && x1 < 1) || (n[0] === -1 && x0 > 0) || (n[1] === 1 && y1 < 1) || (n[1] === -1 && y0 > 0) || (n[2] === 1 && z1 < 1) || (n[2] === -1 && z0 > 0);
   const fx = inset ? x : x + n[0], fy = inset ? y : y + n[1], fz = inset ? z : z + n[2];
@@ -718,30 +720,27 @@ function emitFace(buf, F, x, y, z, tex, tint, getP, getL, box, noAO = false, fla
     // AO + smooth light
     let aoV = 3, ls = lc >> 4, lb = lc & 15, cnt = 1;
     if (!noAO && !flat) {
-      const d1 = [0, 0, 0], d2 = [0, 0, 0];
       // tangent directions toward this corner
-      const axes = [0, 1, 2].filter((a) => n[a] === 0);
-      d1[axes[0]] = c[axes[0]] ? 1 : -1;
-      d2[axes[1]] = c[axes[1]] ? 1 : -1;
-      const s1x = fx + d1[0], s1y = fy + d1[1], s1z = fz + d1[2];
-      const s2x = fx + d2[0], s2y = fy + d2[1], s2z = fz + d2[2];
-      const cxx = fx + d1[0] + d2[0], cyy = fy + d1[1] + d2[1], czz = fz + d1[2] + d2[2];
+      const a = c[ax0] ? 1 : -1, bb = c[ax1] ? 1 : -1;
+      const d1x = ax0 === 0 ? a : 0, d1y = ax0 === 1 ? a : 0, d1z = ax0 === 2 ? a : 0;
+      const d2x = ax1 === 0 ? bb : 0, d2y = ax1 === 1 ? bb : 0, d2z = ax1 === 2 ? bb : 0;
+      const s1x = fx + d1x, s1y = fy + d1y, s1z = fz + d1z;
+      const s2x = fx + d2x, s2y = fy + d2y, s2z = fz + d2z;
+      const cxx = fx + d1x + d2x, cyy = fy + d1y + d2y, czz = fz + d1z + d2z;
       const o1 = OPAQUE[getP(s1x, s1y, s1z)], o2 = OPAQUE[getP(s2x, s2y, s2z)], oc = OPAQUE[getP(cxx, cyy, czz)];
       aoV = o1 && o2 ? 0 : 3 - (o1 + o2 + oc);
       if (!o1) { const l = getL(s1x, s1y, s1z); ls += l >> 4; lb += l & 15; cnt++; }
       if (!o2) { const l = getL(s2x, s2y, s2z); ls += l >> 4; lb += l & 15; cnt++; }
       if (!oc && !(o1 && o2)) { const l = getL(cxx, cyy, czz); ls += l >> 4; lb += l & 15; cnt++; }
     }
-    ao.push(aoV);
-    lights.push(ls / cnt / 15, lb / cnt / 15);
+    if (k === 0) ao0 = aoV; else if (k === 1) ao1 = aoV; else if (k === 2) ao2 = aoV; else ao3 = aoV;
+    buf.light.push(ls / cnt / 15, lb / cnt / 15);
     const shadeF = (flat ? 1 : F.s) * AO_CURVE[aoV];
-    const t = tint ?? [1, 1, 1];
     buf.col.push(t[0] * shadeF, t[1] * shadeF, t[2] * shadeF);
+    buf.nrm.push(n[0], n[1], n[2]); buf.mat.push(mat);
   }
-  buf.light.push(...lights);
-  for (let k = 0; k < 4; k++) { buf.nrm.push(n[0], n[1], n[2]); buf.mat.push(mat); }
   // flip quad diagonal for nicer AO interpolation
-  if (ao[0] + ao[2] < ao[1] + ao[3]) buf.ind.push(base + 1, base + 2, base + 3, base + 1, base + 3, base);
+  if (ao0 + ao2 < ao1 + ao3) buf.ind.push(base + 1, base + 2, base + 3, base + 1, base + 3, base);
   else buf.ind.push(base, base + 1, base + 2, base, base + 2, base + 3);
 }
 

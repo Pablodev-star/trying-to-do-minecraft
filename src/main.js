@@ -1828,7 +1828,7 @@ function drawLogo(c) {
 
 // ---------------------------------------------------------------- storage helpers
 function loadOptions() {
-  const def = { fov: 70, renderDistance: IS_TOUCH ? 4 : 6, sensitivity: 100, volume: 60, guiScale: IS_TOUCH ? (Math.min(innerWidth, innerHeight) < 500 ? 1.5 : 2) : 2, difficulty: 'normal', bobbing: true, clouds: !IS_TOUCH, shaders: false, fancy: !IS_TOUCH };
+  const def = { fov: 70, renderDistance: IS_TOUCH ? 4 : 6, sensitivity: 100, volume: 60, guiScale: IS_TOUCH ? (Math.min(innerWidth, innerHeight) < 500 ? 1.5 : 2) : 2, difficulty: 'normal', bobbing: true, clouds: !IS_TOUCH, shaders: false, fancy: false };
   try { return { ...def, ...JSON.parse(localStorage.getItem('mc_options') || '{}') }; } catch { return def; }
 }
 function listWorlds() { try { return JSON.parse(localStorage.getItem('mc_worlds') || '[]').sort((a, b) => b.lastPlayed - a.lastPlayed); } catch { return []; } }

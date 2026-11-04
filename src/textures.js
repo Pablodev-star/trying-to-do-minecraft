@@ -613,7 +613,15 @@ const tileCanvases = {};
   }
 }
 export function tileCanvas(name) { return tileCanvases[name]; }
+const uvCache = new Map();
 export function tileUV(name) {
+  const hit = uvCache.get(name);
+  if (hit) return hit;
+  const r = computeUV(name);
+  uvCache.set(name, r);
+  return r;
+}
+function computeUV(name) {
   const idx = tileIndex[name] ?? 0;
   const tx = idx % ATLAS_TILES, ty = Math.floor(idx / ATLAS_TILES);
   // flipY=false on texture; v grows downward in atlas
