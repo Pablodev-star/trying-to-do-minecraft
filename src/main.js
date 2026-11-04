@@ -288,7 +288,7 @@ class Game {
       p.inventory = ps.inventory; p.armor = ps.armor; p.selected = ps.selected ?? 0; p.mode = ps.mode ?? meta.mode;
       p.spawnPoint = ps.spawnPoint; p.flying = ps.flying ?? false;
       this.loadChunksAround(true);
-      for (const m of save.mobs ?? []) { const e = this.spawnMob(m.type, m.x, m.y, m.z, { baby: m.baby, woolColor: m.wool }); if (e) { e.tamed = m.tamed; if (m.tamed) e.owner = this.player; if (m.sheared) e.shear(); } }
+      for (const m of save.mobs ?? []) { const e = this.spawnMob(m.type, m.x, m.y, m.z, { baby: m.baby, woolColor: m.wool }); if (e) { e.tamed = m.tamed; e.home = m.home; if (m.tamed) e.owner = this.player; if (m.sheared) e.shear(); } }
     } else if (this.player.mode === 'creative') this.player.give(I.grass_block, 1);
     this.running = true;
     this.ui.screen = null;
@@ -304,7 +304,7 @@ class Game {
   enterDimension(dim, newPlayer = false) {
     if (this.world) {
       this.dimData[this.dim] = this.world.serialize();
-      for (const e of this.entities) this.scene.remove(e.mesh);
+      for (const e of this.entities) { this.scene.remove(e.mesh); if (e.home) this.villagesSpawned?.delete(e.home); }
       this.entities = [];
       this.scene.remove(this.world.group); this.world.dispose();
     }
@@ -532,9 +532,10 @@ class Game {
     const dims = { ...this.dimData, [this.dim]: this.world.serialize() };
     const p = this.player;
     const mobs = this.entities.filter((e) => e instanceof Mob && !e.dead && !e.hostile && e.type !== 'ender_dragon' && e.pos.distanceTo(p.pos) < 96)
-      .map((e) => ({ type: e.type, x: e.pos.x, y: e.pos.y, z: e.pos.z, baby: e.baby, tamed: e.tamed, sheared: e.sheared, wool: e.woolColor }));
+      .map((e) => ({ type: e.type, x: e.pos.x, y: e.pos.y, z: e.pos.z, baby: e.baby, tamed: e.tamed, sheared: e.sheared, wool: e.woolColor, home: e.home }));
+    const keptVillages = this.dim === 'overworld' ? [...new Set(mobs.map((m) => m.home).filter(Boolean))] : [...this.villagesSpawned];
     const data = {
-      version: 1, seed: this.seed, time: this.time, dims, villagesSpawned: [...this.villagesSpawned], weather: { target: this.weather.target, thunder: this.weather.thunder, timer: this.weather.timer }, dragonKilled: this.dragonKilled, keepInventory: this.keepInventory,
+      version: 1, seed: this.seed, time: this.time, dims, villagesSpawned: keptVillages, weather: { target: this.weather.target, thunder: this.weather.thunder, timer: this.weather.timer }, dragonKilled: this.dragonKilled, keepInventory: this.keepInventory,
       achievements: [...this.achievements], stats: this.stats, mobs: this.dim === 'overworld' ? mobs : [],
       player: { pos: [p.pos.x, p.pos.y, p.pos.z], yaw: p.yaw, pitch: p.pitch, health: p.health, food: p.food, saturation: p.saturation, xp: p.xp, level: p.level, inventory: p.inventory, armor: p.armor, selected: p.selected, mode: p.mode, dim: this.dim, spawnPoint: p.spawnPoint, flying: p.flying },
     };
@@ -726,10 +727,10 @@ class Game {
         const b = v.buildings[i % v.buildings.length];
         const sx = Math.floor((b.x + v.x) / 2) + (i % 3) - 1, sz = Math.floor((b.z + v.z) / 2);
         const sy = w.surfaceY(sx, sz);
-        if (sy > 0) this.spawnMob('villager', sx + 0.5, sy + 1, sz + 0.5, { baby: Math.random() < 0.2 });
+        if (sy > 0) { const e = this.spawnMob('villager', sx + 0.5, sy + 1, sz + 0.5, { baby: Math.random() < 0.2 }); if (e) e.home = v.id; }
       }
       const gy = w.surfaceY(v.x + 4, v.z + 4);
-      if (gy > 0) this.spawnMob('iron_golem', v.x + 4.5, gy + 1, v.z + 4.5);
+      if (gy > 0) { const e = this.spawnMob('iron_golem', v.x + 4.5, gy + 1, v.z + 4.5); if (e) e.home = v.id; }
       this.achieve('¡Una aldea!');
     }
   }
@@ -779,7 +780,7 @@ class Game {
       if (!(e instanceof Mob) || e.dead) continue;
       const d = e.pos.distanceTo(p.pos);
       if (e.type === 'ender_dragon') continue;
-      if (d > 128 || (e.hostile && this.difficulty === 'peaceful')) { e.remove = true; continue; }
+      if (d > 128 || (e.hostile && this.difficulty === 'peaceful')) { e.remove = true; if (e.home) this.villagesSpawned.delete(e.home); continue; }
       if (e.hostile && d > 48 && Math.random() < 0.02) { e.remove = true; continue; }
       if (e.hostile) hostile++; else passive++;
     }

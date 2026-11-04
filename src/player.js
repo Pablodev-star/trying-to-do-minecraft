@@ -568,6 +568,7 @@ export class Player {
     if (b.shape === 'slab' && hit.id === id) {
       const m = w.getMeta(hit.x, hit.y, hit.z);
       if ((hit.face[1] === 1 && !(m & 1)) || (hit.face[1] === -1 && (m & 1))) {
+        if (this.blocked([[hit.x, hit.y, hit.z, [[0, 0, 0, 1, 1, 1]]]])) return;
         w.setBlock(hit.x, hit.y, hit.z, B[b.base]); this.consumeHeld(); this.swing = 1; g.sfx('place:' + b.sound); return;
       }
     }
@@ -576,6 +577,7 @@ export class Player {
     const { x, y, z } = tgt;
     if (y < 0 || y >= 128) return;
     if (b.shape === 'slab' && w.getBlock(x, y, z) === id) {
+      if (this.blocked([[x, y, z, [[0, 0, 0, 1, 1, 1]]]])) return;
       w.setBlock(x, y, z, B[b.base]); this.consumeHeld(); this.swing = 1; g.sfx('place:' + b.sound); return;
     }
     // support rules
@@ -617,17 +619,17 @@ export class Player {
       meta = this.facingMeta();
       extra = { x: x + hx, y, z: z + hz, meta: meta | 4 };
     }
-    // collision with entities
+    // collision with entities (both halves of doors and beds)
     if (b.solid) {
-      const get = (dx, dy, dz) => w.getBlock(x + dx, y + dy, z + dz);
-      let boxes = shapeBoxes(b, meta, get);
-      if (b.orient && b.box && !b.shape) boxes = boxes.map((bx) => rotateBox(bx, meta & 3));
-      const overlaps = (e) => {
-        const hw = e.w / 2;
-        return boxes.some((bb) => e.pos.x + hw > x + bb[0] && e.pos.x - hw < x + bb[3] && e.pos.y + e.h > y + bb[1] && e.pos.y < y + bb[4] && e.pos.z + hw > z + bb[2] && e.pos.z - hw < z + bb[5]);
+      const boxesFor = (bx, by, bz, m) => {
+        const get = (dx, dy, dz) => w.getBlock(bx + dx, by + dy, bz + dz);
+        let boxes = shapeBoxes(b, m, get);
+        if (b.orient && b.box && !b.shape) boxes = boxes.map((q) => rotateBox(q, m & 3));
+        return [bx, by, bz, boxes];
       };
-      if (this.mode !== 'spectator' && overlaps(this)) return;
-      for (const e of g.entities) if (e instanceof Mob && !e.dead && overlaps(e)) return;
+      const parts = [boxesFor(x, y, z, meta)];
+      if (extra) parts.push(boxesFor(extra.x, extra.y, extra.z, extra.meta));
+      if (this.blocked(parts)) return;
     }
     w.setBlock(x, y, z, id, meta, extra ? { noUpdate: true } : {});
     if (extra) { w.setBlock(extra.x, extra.y, extra.z, id, extra.meta, { noUpdate: true }); }
@@ -636,6 +638,17 @@ export class Player {
     g.stats.placed++;
     g.sfx('place:' + b.sound);
     if (id === B.pumpkin || id === B.jack_o_lantern) g.checkGolem(x, y, z);
+  }
+
+  // true if the player (unless spectating) or a living mob overlaps any of the given boxes
+  // parts: [[x, y, z, boxes(local 0..1)], ...]
+  blocked(parts) {
+    const overlaps = (e) => {
+      const hw = e.w / 2;
+      return parts.some(([x, y, z, boxes]) => boxes.some((bb) => e.pos.x + hw > x + bb[0] && e.pos.x - hw < x + bb[3] && e.pos.y + e.h > y + bb[1] && e.pos.y < y + bb[4] && e.pos.z + hw > z + bb[2] && e.pos.z - hw < z + bb[5]));
+    };
+    if (this.mode !== 'spectator' && overlaps(this)) return true;
+    return this.game.entities.some((e) => e instanceof Mob && !e.dead && overlaps(e));
   }
 
   facingMeta() {
