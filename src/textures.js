@@ -765,6 +765,7 @@ const itemSpriteDefs = {
   bone_meal: () => dust('bm', 0xe8e8e0),
   flint: () => blob('flint', 0x3a3a3a, 4, 5.5, 8, 8, (t) => t.speckle(hex(0x6a6a6a), 0.1)),
   apple: () => blob('apple', 0xd8221a, 5, 5, 8, 9, (t) => { t.rect(8, 2, 1, 3, hex(0x5a3a1a)); t.set(9, 3, hex(0x3a8a1a)); t.set(10, 3, hex(0x3a8a1a)); t.set(6, 7, hex(0xff8a7a)); }),
+  enchanted_golden_apple: () => itemSpriteDefs.golden_apple(),
   golden_apple: () => blob('gapple', 0xf0c830, 5, 5, 8, 9, (t) => { t.rect(8, 2, 1, 3, hex(0x5a3a1a)); t.set(6, 7, hex(0xfff0a0)); }),
   bread: () => blob('bread', 0xb8823a, 7, 3.5, 8, 9, (t) => { for (const x of [4, 7, 10]) t.line(x, 7, x + 1, 9, hex(0x8a5a1a)); }),
   porkchop: () => food('pork', 0xf08a8a),

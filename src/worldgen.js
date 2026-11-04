@@ -1,6 +1,7 @@
 // Terrain generators for the Overworld, Nether and End.
 import { Simplex, hash3, mulberry32 } from './noise.js';
 import { B, BLOCKS } from './registry.js';
+import { STRUCTURES, mineshaft } from './structures.js';
 const BLOCKS_REPLACE = new Set();
 queueMicrotask(() => { for (const b of BLOCKS) if (b.replaceable || b.render === 'cross') BLOCKS_REPLACE.add(b.id); });
 
@@ -210,6 +211,8 @@ export class Generator {
     // features (trees etc) from this and neighbouring chunks
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) this.featuresOverworld(cx + dx, cz + dz, cx, cz, data);
     this.placeVillages(cx, cz, data);
+    this.placeStructures(cx, cz, data);
+    mineshaft(this, cx, cz, this.clipSetter(cx, cz, data, true), data, idx, CS);
     this.placeDungeon(cx, cz, data);
     this.placeStronghold(cx, cz, data);
   }
@@ -363,6 +366,60 @@ export class Generator {
       }
     }
     set(x, top + (kind === 'jungle' ? 1 : 0), z, L);
+  }
+
+  // ------------------------------------------------------------ structures
+  clipSetter(cx, cz, data, undergroundOnly = false) {
+    const ox = cx * CS, oz = cz * CS;
+    return (wx, wy, wz, id, meta = 0) => {
+      const x = wx - ox, z = wz - oz;
+      if (x < 0 || x >= 16 || z < 0 || z >= 16 || wy <= 0 || wy >= CH) return;
+      const i = idx(x, wy, z);
+      if (undergroundOnly && (data[i] === B.water || data[i] === B.lava || data[i] === B.bedrock)) return;
+      data[i] = id;
+      if (meta) (this.pendingMeta ??= []).push([cx, cz, i, meta]);
+    };
+  }
+  structureAt(gx, gz) {
+    const key = `${this.dim}:${gx},${gz}`;
+    this.structCache ??= new Map();
+    if (this.structCache.has(key)) return this.structCache.get(key);
+    const r = mulberry32((this.seed * 9973 + gx * 65537 + gz * 40503 + 5) >>> 0);
+    let st = null;
+    const x = gx * 400 + 80 + Math.floor(r() * 240), z = gz * 400 + 80 + Math.floor(r() * 240);
+    if (this.dim === 'overworld' && r() < 0.8) {
+      const { biome, h } = this.heightInfo(x, z);
+      let type = null;
+      if (biome === 6) type = 'desert_temple';
+      else if (biome === 9) type = 'jungle_temple';
+      else if (biome === 7 || biome === 19) type = 'igloo';
+      else if (biome === 11 || biome === 18) type = 'witch_hut';
+      else if (biome === 0 || biome === 20 || biome === 21) type = 'shipwreck';
+      else if ([2, 3, 4, 5, 10, 14].includes(biome)) type = r() < 0.55 ? 'outpost' : 'ruined_portal';
+      else if (biome !== 1) type = 'ruined_portal';
+      if (type) st = { type, x, z, y: type === 'shipwreck' ? Math.max(20, h + 1) : h + 1, seed: (r() * 1e9) | 0 };
+    } else if (this.dim === 'nether' && r() < 0.6) {
+      for (let y = 40; y < 90; y++) { st = { type: 'bastion', x, z, y: 34 + Math.floor(r() * 20), seed: (r() * 1e9) | 0 }; break; }
+    } else if (this.dim === 'end' && r() < 0.7) {
+      const d = Math.hypot(x, z);
+      if (d > 760) { const n = this.n3.fbm2(x / 120, z / 120, 3); if (n > 0.3) st = { type: 'end_city', x, z, y: Math.floor(56 + (n - 0.25) * 30), seed: (r() * 1e9) | 0 }; }
+    }
+    this.structCache.set(key, st);
+    return st;
+  }
+  structuresNear(x, z, radius = 1) {
+    const gx = Math.floor(x / 400), gz = Math.floor(z / 400), out = [];
+    for (let dx = -radius; dx <= radius; dx++) for (let dz = -radius; dz <= radius; dz++) { const s = this.structureAt(gx + dx, gz + dz); if (s) out.push(s); }
+    return out;
+  }
+  placeStructures(cx, cz, data) {
+    const ox = cx * CS + 8, oz = cz * CS + 8;
+    for (const s of this.structuresNear(ox, oz)) {
+      if (Math.abs(s.x - ox) > 40 || Math.abs(s.z - oz) > 40) continue;
+      const rng = mulberry32(s.seed);
+      const info = STRUCTURES[s.type]({ x: s.x, y: s.y, z: s.z, rng, seed: s.seed }, this.clipSetter(cx, cz, data));
+      s.info = info;
+    }
   }
 
   // ------------------------------------------------------------ villages
@@ -620,7 +677,8 @@ export class Generator {
       }
     };
     vein(B.nether_quartz_ore, 14, 10, 10, 118); vein(B.nether_gold_ore, 8, 8, 10, 118);
-    vein(B.ancient_debris, 1, 2, 8, 22); vein(B.blackstone, 2, 20, 4, 40); vein(B.gravel, 2, 20, 28, 40);
+    vein(B.ancient_debris, 1, 2, 8, 22);
+    this.placeStructures(cx, cz, data); vein(B.blackstone, 2, 20, 4, 40); vein(B.gravel, 2, 20, 28, 40);
     if (rng() < 0.3) vein(B.basalt, 3, 30, 30, 90);
     // mini fortress bridges: deterministic nether brick corridors on a grid
     if (((cx & 7) === 3) && hash3(this.seed, cx >> 3, 0, cz >> 3) < 0.5) {
@@ -630,6 +688,8 @@ export class Generator {
           data[idx(x, y, z)] = floor || roof || (wall && (z % 4 !== 2 || y < 62 || y > 64)) ? B.nether_bricks : 0;
         }
         if (z % 8 === 0) for (let y = 30; y < 60; y++) { data[idx(7, y, z)] = B.nether_bricks; data[idx(9, y, z)] = B.nether_bricks; }
+        if (z === 4 && hash3(this.seed, cx, 61, cz) < 0.35) { data[idx(8, 61, z)] = B.spawner; (this.pendingMeta ??= []).push([cx, cz, idx(8, 61, z), 4]); }
+        if (z === 12 && hash3(this.seed, cx, 62, cz) < 0.4) { data[idx(7, 61, z)] = B.soul_sand; data[idx(7, 62, z)] = B.nether_wart_3; data[idx(9, 61, z)] = B.chest; (this.pendingMeta ??= []).push([cx, cz, idx(9, 61, z), 4]); }
       }
     }
   }
@@ -683,6 +743,7 @@ export class Generator {
         if (dx === 0 && dz === 0) data[idx(x, h, z)] = B.bedrock;
       }
     }
+    this.placeStructures(cx, cz, data);
     // exit portal frame (bedrock), portal filled after dragon death
     for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
       const x = dx - x0, z = dz - z0;

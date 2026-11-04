@@ -358,10 +358,11 @@ item('glass_bottle', 'Frasco de cristal');
 item('amethyst_shard', 'Fragmento de amatista');
 item('chorus_fruit', 'Fruta de coro', { food: [4, 2.4], chorus: true });
 item('popped_chorus_fruit', 'Fruta de coro reventada');
-item('wither_skeleton_skull', 'Cráneo de esqueleto wither', { stack: 64 });
-item('nether_star', 'Estrella del Nether');
-item('shulker_shell', 'Caparazón de shulker');
-item('prismarine_shard', 'Fragmento de prismarina');
+item('wither_skeleton_skull', 'Cráneo calcinado', { stack: 64 });
+item('nether_star', 'Estrella del coloso');
+item('enchanted_golden_apple', 'Manzana dorada encantada', { food: [4, 9.6] });
+item('shulker_shell', 'Fragmento de centinela');
+item('prismarine_shard', 'Escama abisal');
 item('honeycomb', 'Panal');
 item('rabbit_hide', 'Piel de conejo');
 item('goat_horn', 'Cuerno de cabra', { stack: 1 });
@@ -377,7 +378,7 @@ item('splash_potion', 'Poción arrojadiza', { stack: 1, kind: 'potion', splash: 
 item('experience_bottle', 'Frasco de experiencia');
 item('enchanted_book', 'Libro encantado', { stack: 1 });
 item('name_tag', 'Etiqueta');
-for (const [n, d] of [['nether_wart', 'Verruga del Nether'], ['spider_eye', 'Ojo de araña'], ['fermented_spider_eye', 'Ojo de araña fermentado'], ['glistering_melon_slice', 'Rodaja de sandía reluciente'], ['magma_cream', 'Crema de magma'], ['rabbit_foot', 'Pata de conejo'], ['phantom_membrane', 'Membrana de phantom'], ['turtle_scute', 'Escama de tortuga'], ['lapis_dummy', 'x']]) if (n !== 'lapis_dummy') item(n, d);
+for (const [n, d] of [['nether_wart', 'Verruga del Nether'], ['spider_eye', 'Ojo de araña'], ['fermented_spider_eye', 'Ojo de araña fermentado'], ['glistering_melon_slice', 'Rodaja de sandía reluciente'], ['magma_cream', 'Crema de magma'], ['rabbit_foot', 'Pata de conejo'], ['phantom_membrane', 'Membrana espectral'], ['turtle_scute', 'Escama de tortuga'], ['lapis_dummy', 'x']]) if (n !== 'lapis_dummy') item(n, d);
 item('golden_carrot', 'Zanahoria dorada', { food: [6, 14.4] });
 const FOOD = [
   ['apple', 'Manzana', 4, 2.4], ['golden_apple', 'Manzana dorada', 4, 9.6], ['bread', 'Pan', 5, 6], ['porkchop', 'Chuleta de cerdo cruda', 3, 1.8],

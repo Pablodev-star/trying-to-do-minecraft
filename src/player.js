@@ -563,6 +563,12 @@ export class Player {
       if (e.type === 'villager') { if (e.baby || e.nitwit || !e.profession) { g.sfx('no'); g.chat(e.nitwit ? 'Este aldeano no sabe comerciar.' : 'Este aldeano todavía no tiene profesión. Coloca cerca un bloque de trabajo.'); return; } g.ui.openTrade(e); return; }
       if (e.type === 'sheep' && name === 'shears') { if (e.shear()) { this.damageHeld(); g.sfx('shear'); } return; }
       if (e.type === 'cow' && name === 'bucket') { this.replaceHeld(I.milk_bucket); return; }
+      if (e.info.tameWith?.includes(name) && !e.tamed) {
+        this.consumeHeld();
+        if (Math.random() < 0.33) { e.tamed = true; e.owner = this; e.persistent = true; g.chat('¡Lo has domesticado!'); g.particles?.burst(e.pos.x, e.pos.y + 1, e.pos.z, 0xff6080); } return;
+      }
+      if (e.tamed && e.owner === this && (e.type === 'cat' || e.type === 'parrot') && !it) { e.sitting = !e.sitting; return; }
+      if (e.type === 'ash_goblin' && name === 'gold_ingot' && !e.angry && !(e.bartering > 0)) { this.consumeHeld(); e.bartering = 3; g.sfx('equip'); return; }
       if (e.type === 'wolf' && name === 'bone' && !e.tamed) {
         this.consumeHeld();
         if (Math.random() < 0.33) { e.tamed = true; e.owner = this; e.angry = false; e.target = null; g.chat('¡Has domesticado un lobo!'); } return;
@@ -741,6 +747,25 @@ export class Player {
       }
     }
     // seeds / crops
+    if (it.name === 'wither_skeleton_skull' && (id === B.soul_sand || id === B.soul_soil) && hit.face[1] === 1) {
+      if (this.countItem(I.wither_skeleton_skull) < 3 && this.mode !== 'creative') { g.chat('Necesitas 3 cráneos calcinados sobre una T de arena de almas.'); return; }
+      const isSoul = (bx, by, bz) => [B.soul_sand, B.soul_soil].includes(w.getBlock(bx, by, bz));
+      for (const [ax, az] of [[1, 0], [0, 1]]) {
+        for (const c of [0, 1, -1]) {
+          const cx = hit.x - ax * c, cz = hit.z - az * c, cy = hit.y;
+          if (isSoul(cx, cy, cz) && isSoul(cx + ax, cy, cz + az) && isSoul(cx - ax, cy, cz - az) && isSoul(cx, cy - 1, cz)) {
+            for (const [bx, by, bz] of [[cx, cy, cz], [cx + ax, cy, cz + az], [cx - ax, cy, cz - az], [cx, cy - 1, cz]]) w.setBlock(bx, by, bz, 0);
+            if (this.mode !== 'creative') this.takeItem(I.wither_skeleton_skull, 3);
+            g.spawnMob('ash_colossus', cx + 0.5, cy, cz + 0.5);
+            g.explode(cx + 0.5, cy + 1, cz + 0.5, 3, false);
+            g.chat('¡El Coloso de ceniza ha despertado!'); g.sfx('dragon');
+            return;
+          }
+        }
+      }
+      g.chat('La estructura no es correcta: 4 bloques de arena de almas en forma de T.');
+      return;
+    }
     if (it.name === 'nether_wart' && id === B.soul_sand && hit.face[1] === 1 && !w.getBlock(hit.x, hit.y + 1, hit.z)) { w.setBlock(hit.x, hit.y + 1, hit.z, B.nether_wart_0); this.consumeHeld(); return; }
     const crop = { wheat_seeds: B.wheat_0, carrot: B.carrots_0, potato: B.potatoes_0 }[it.name];
     if (crop != null) {

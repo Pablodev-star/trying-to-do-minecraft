@@ -273,6 +273,8 @@ class Game {
     this.time = save?.time ?? 1000;
     this.dragonKilled = save?.dragonKilled ?? false;
     this.villagesSpawned = new Set(save?.villagesSpawned ?? []);
+    this.structuresSpawned = new Set(save?.structuresSpawned ?? []);
+    this.daysAwake = save?.daysAwake ?? 0;
     if (save?.weather) Object.assign(this.weather, save.weather, { rain: save.weather.target });
     else Object.assign(this.weather, { rain: 0, target: 0, thunder: false, timer: 300 + Math.random() * 400 });
     this.keepInventory = save?.keepInventory ?? false;
@@ -527,6 +529,7 @@ class Game {
     if (t < 12541 || t > 23458) { this.chat('Solo puedes dormir de noche. Punto de reaparición establecido.'); return; }
     if (this.entities.some((e) => e instanceof Mob && e.hostile && !e.dead && e.pos.distanceTo(p.pos) < 8)) { this.chat('No puedes descansar ahora, hay monstruos cerca.'); return; }
     const fade = $('#fade'); fade.style.opacity = 1;
+    this.daysAwake = 0;
     setTimeout(() => { this.time = Math.ceil(this.time / 24000) * 24000; fade.style.opacity = 0; this.chat('Buenos días.'); }, 1500);
   }
 
@@ -539,7 +542,7 @@ class Game {
       .map((e) => ({ type: e.type, x: e.pos.x, y: e.pos.y, z: e.pos.z, baby: e.baby, tamed: e.tamed, sheared: e.sheared, wool: e.woolColor, home: e.home, name: e.customName, v: e.type === 'villager' ? { ...e.villagerSnapshot(), jobPos: e.jobPos, nitwit: e.nitwit } : undefined }));
     const keptVillages = this.dim === 'overworld' ? [...new Set(mobs.map((m) => m.home).filter(Boolean))] : [...this.villagesSpawned];
     const data = {
-      version: 2, seed: this.seed, time: this.time, dims, villagesSpawned: keptVillages, weather: { target: this.weather.target, thunder: this.weather.thunder, timer: this.weather.timer }, dragonKilled: this.dragonKilled, keepInventory: this.keepInventory,
+      version: 2, seed: this.seed, time: this.time, dims, villagesSpawned: keptVillages, structuresSpawned: [...this.structuresSpawned], daysAwake: this.daysAwake, weather: { target: this.weather.target, thunder: this.weather.thunder, timer: this.weather.timer }, dragonKilled: this.dragonKilled, keepInventory: this.keepInventory,
       achievements: [...this.achievements], stats: this.stats, mobs: this.dim === 'overworld' ? mobs : [],
       player: { pos: [p.pos.x, p.pos.y, p.pos.z], yaw: p.yaw, pitch: p.pitch, health: p.health, food: p.food, saturation: p.saturation, xp: p.xp, level: p.level, inventory: p.inventory, armor: p.armor, selected: p.selected, mode: p.mode, dim: this.dim, spawnPoint: p.spawnPoint, flying: p.flying },
     };
@@ -726,7 +729,7 @@ class Game {
       if (type === 'chest' && this.dim === 'overworld' && this.world.gen.stronghold && Math.abs(x - this.world.gen.stronghold.x) < 8 && Math.abs(z - this.world.gen.stronghold.z) < 8 && !this.world.tiles.has(k)) {
         t.items[3] = { id: I.ender_pearl, count: 2, dmg: 0 }; t.items[7] = { id: I.iron_ingot, count: 4, dmg: 0 }; t.items[12] = { id: I.bread, count: 3, dmg: 0 }; t.items[20] = { id: I.blaze_rod, count: 1, dmg: 0 };
       }
-      if (type === 'chest' && !this.world.tiles.has(k) && (this.world.getMeta(x, y, z) & 4)) this.fillLoot(t.items);
+      if (type === 'chest' && !this.world.tiles.has(k) && (this.world.getMeta(x, y, z) & 4)) this.fillLoot(t.items, BLOCKS[this.world.getBlock(x, y - 1, z)]?.name);
       this.world.tiles.set(k, t);
     }
     return t;
@@ -794,7 +797,14 @@ class Game {
     }
     return Math.min(15, n);
   }
-  fillLoot(items) {
+  fillLoot(items, below = '') {
+    const extra = [];
+    if (this.dim === 'end') extra.push(['elytra', 1, 1, 0.5], ['diamond', 2, 7, 0.6], ['emerald', 2, 6, 0.5], ['diamond_chestplate', 1, 1, 0.25], ['shulker_shell', 1, 2, 0.4]);
+    if (/sandstone|terracotta/.test(below)) extra.push(['gold_ingot', 2, 7, 0.6], ['diamond', 1, 3, 0.25], ['emerald', 1, 3, 0.3], ['bone', 4, 6, 0.6], ['golden_apple', 1, 1, 0.2], ['enchanted_golden_apple', 1, 1, 0.03]);
+    if (/blackstone|gold/.test(below)) extra.push(['gold_block', 1, 2, 0.4], ['netherite_scrap', 1, 2, 0.25], ['ancient_debris', 1, 1, 0.15], ['gold_ingot', 4, 9, 0.7]);
+    if (/nether_brick|soul/.test(below)) extra.push(['nether_wart', 3, 7, 0.6], ['gold_ingot', 1, 3, 0.5], ['diamond', 1, 2, 0.2], ['saddle', 1, 1, 0.3]);
+    if (/obsidian|netherrack|magma|stone_brick/.test(below)) extra.push(['obsidian', 1, 2, 0.4], ['flint_and_steel', 1, 1, 0.4], ['gold_ingot', 2, 6, 0.6], ['golden_carrot', 4, 8, 0.3]);
+    for (const [name, a, b, pr] of extra) if (I[name] != null && Math.random() < pr) { let s = Math.floor(Math.random() * 27); for (let n = 0; n < 30 && items[s]; n++) s = Math.floor(Math.random() * 27); items[s] = { id: I[name], count: a + Math.floor(Math.random() * (b - a + 1)), dmg: 0 }; }
     const table = [
       ['bread', 1, 4, 0.6], ['wheat', 2, 6, 0.4], ['iron_ingot', 1, 4, 0.45], ['gold_ingot', 1, 3, 0.3], ['diamond', 1, 2, 0.1],
       ['emerald', 1, 3, 0.15], ['coal', 3, 10, 0.5], ['bone', 2, 6, 0.4], ['rotten_flesh', 1, 6, 0.4], ['string', 1, 4, 0.3],
@@ -813,7 +823,13 @@ class Game {
   // Mob spawners from dungeons and villages populating themselves
   structureTick() {
     const p = this.player, w = this.world;
-    if (!p || this.dim !== 'overworld') return;
+    if (!p) return;
+    // structure inhabitants spawn the first time the player comes close
+    for (const s of w.gen.structuresNear?.(p.pos.x, p.pos.z) ?? []) {
+      if (!s.info || this.structuresSpawned.has(`${this.dim}:${s.x},${s.z}`) || Math.hypot(s.x - p.pos.x, s.z - p.pos.z) > 48) continue;
+      this.structuresSpawned.add(`${this.dim}:${s.x},${s.z}`);
+      for (const k of ['spawn', 'spawn2', 'spawn3']) { const sp = s.info[k]; if (sp && MOB_INFO[sp[0]]) this.spawnMob(sp[0], sp[1], sp[2], sp[3]); }
+    }
     // spawners
     for (const k of w.spawners) {
       const [x, y, z] = k.split(',').map(Number);
@@ -824,7 +840,7 @@ class Game {
       if (this.difficulty === 'peaceful' || Math.random() > 0.08) continue;
       const near = this.entities.filter((e) => e instanceof Mob && !e.dead && e.pos.distanceTo(new THREE.Vector3(x, y, z)) < 9).length;
       if (near >= 5) continue;
-      const type = ['zombie', 'skeleton', 'spider'][(w.getMeta(x, y, z) || 1) - 1] ?? 'zombie';
+      const type = ['zombie', 'skeleton', 'cave_spider', 'blaze'][(w.getMeta(x, y, z) || 1) - 1] ?? 'zombie';
       for (let i = 0; i < 4; i++) {
         const sx = x + Math.floor((Math.random() - 0.5) * 7), sz = z + Math.floor((Math.random() - 0.5) * 7);
         if (!w.getBlock(sx, y, sz) && !w.getBlock(sx, y + 1, sz) && SOLID[w.getBlock(sx, y - 1, sz)]) { this.spawnMob(type, sx + 0.5, y, sz + 0.5); this.particles.burst(sx + 0.5, y + 0.5, sz + 0.5, 0x606060); break; }
@@ -941,8 +957,27 @@ class Game {
         const biome = w.biomeAt(x, z);
         const ground = w.getBlock(x, surf, z);
         const sky = (w.getLight(x, surf + 1, z) >> 4);
-        if (ground === B.grass_block && passive < 12 && Math.random() < 0.15 && sky >= 9) {
-          const pool = biome === 5 || biome === 7 ? ['wolf', 'sheep', 'cow'] : biome === 9 ? ['chicken', 'pig'] : biome === 6 ? [] : biome === 3 ? ['pig', 'cow', 'sheep', 'chicken', 'wolf'] : ['pig', 'cow', 'sheep', 'chicken', 'horse', 'cow', 'sheep'];
+        // water creatures
+        const wet = w.getBlock(x, surf, z) === B.water || w.getBlock(x, surf + 1, z) === B.water;
+        if (passive < 18 && Math.random() < 0.12) {
+          const wy = (() => { for (let yy = 70; yy > 30; yy--) if (w.getBlock(x, yy, z) === B.water && w.getBlock(x, yy - 3, z) === B.water) return yy - 2; return -1; })();
+          if (wy > 0) {
+            const warm = biome === 20, cold = biome === 21 || biome === 7 || biome === 5;
+            const r2 = Math.random();
+            const type = warm ? (r2 < 0.5 ? 'tropical_fish' : r2 < 0.7 ? 'dolphin' : 'squid') : cold ? (r2 < 0.6 ? 'salmon' : 'squid') : (r2 < 0.45 ? 'cod' : r2 < 0.75 ? 'squid' : r2 < 0.85 ? 'dolphin' : r2 < 0.9 && hostile < 16 ? 'abyssal_eel' : 'cod');
+            const n = type.endsWith('fish') || type === 'cod' || type === 'salmon' ? 3 : 1;
+            for (let i = 0; i < n; i++) this.spawnMob(type, x + 0.5 + i * 0.3, wy, z + 0.5);
+            continue;
+          }
+        }
+        void wet;
+        if ((ground === B.grass_block || ground === B.sand || ground === B.snowy_grass || ground === B.mycelium || ground === B.mud) && passive < 12 && Math.random() < 0.15 && sky >= 9) {
+          const pools = {
+            5: ['wolf', 'sheep', 'fox', 'rabbit', 'fox'], 7: ['rabbit', 'fox', 'polar_bear'], 19: ['polar_bear', 'rabbit'], 9: ['chicken', 'parrot', 'panda', 'parrot', 'pig'],
+            6: ['rabbit'], 17: [], 3: ['pig', 'cow', 'sheep', 'chicken', 'wolf', 'bee'], 14: ['sheep', 'cow'], 15: ['bee', 'rabbit', 'sheep', 'pig'],
+            8: ['goat', 'llama', 'sheep'], 10: ['llama', 'horse', 'cow'], 11: ['frog', 'cow'], 18: ['frog', 'frog', 'cow'], 16: ['cow'], 1: ['turtle'],
+          };
+          const pool = pools[biome] ?? ['pig', 'cow', 'sheep', 'chicken', 'horse', 'cow', 'sheep', 'bee', 'cat'];
           if (!pool.length) continue;
           let type = pool[(Math.random() * pool.length) | 0];
           if (Math.random() < 0.04 && (biome === 2 || biome === 10)) type = 'villager';
@@ -950,7 +985,7 @@ class Game {
           for (let i = 0; i < n; i++) {
             const ox = x + ((Math.random() * 5) | 0) - 2, oz = z + ((Math.random() * 5) | 0) - 2;
             const sy = w.surfaceY(ox, oz);
-            if (sy > 0 && w.getBlock(ox, sy, oz) === B.grass_block) {
+            if (sy > 0 && [B.grass_block, B.sand, B.snowy_grass, B.mycelium, B.mud].includes(w.getBlock(ox, sy, oz))) {
               const colors = ['white', 'white', 'white', 'white', 'white', 'gray', 'light_gray', 'black', 'brown', 'pink'];
               this.spawnMob(type, ox + 0.5, sy + 1, oz + 0.5, { woolColor: colors[(Math.random() * colors.length) | 0], baby: Math.random() < 0.08 });
             }
@@ -958,6 +993,11 @@ class Game {
           continue;
         }
         if (this.difficulty === 'peaceful' || hostile >= 16) continue;
+        if (this.difficulty !== 'peaceful' && hostile < 16 && Math.random() < 0.05 && this.daylightLevel < 0.5) {
+          for (let yy = 70; yy > 40; yy--) if (w.getBlock(x, yy, z) === B.water && w.getBlock(x, yy - 1, z) === B.water) { this.spawnMob('drowned', x + 0.5, yy - 1, z + 0.5); break; }
+        }
+        // night wraiths hunt players who haven't slept for three nights
+        if (this.daysAwake >= 3 && this.daylightLevel < 0.4 && hostile < 16 && Math.random() < 0.04 && p.pos.y > 50 && this.difficulty !== 'peaceful') { this.spawnMob('night_wraith', p.pos.x + (Math.random() - 0.5) * 20, p.pos.y + 20, p.pos.z + (Math.random() - 0.5) * 20); }
         // hostile: random y below surface in darkness
         const y = Math.random() < 0.5 ? surf + 1 : 5 + ((Math.random() * Math.max(1, surf - 5)) | 0);
         if (!SOLID[w.getBlock(x, y - 1, z)] || w.getBlock(x, y, z) || w.getBlock(x, y + 1, z)) continue;
@@ -965,7 +1005,13 @@ class Game {
         const eff = Math.max((l >> 4) * this.daylightLevel, l & 15);
         if (eff > 7) continue;
         const r = Math.random();
-        const type = y < 40 && r < 0.05 ? 'slime' : r < 0.03 ? 'zombie_villager' : r < 0.3 ? 'zombie' : r < 0.55 ? 'skeleton' : r < 0.77 ? 'creeper' : r < 0.94 ? 'spider' : r < 0.985 ? 'enderman' : 'witch';
+        let type = y < 40 && r < 0.05 ? 'slime' : r < 0.03 ? 'zombie_villager' : r < 0.3 ? 'zombie' : r < 0.55 ? 'skeleton' : r < 0.77 ? 'creeper' : r < 0.94 ? 'spider' : r < 0.985 ? 'enderman' : 'witch';
+        const hb = w.biomeAt(x, z);
+        if (type === 'zombie' && hb === 6 && y >= surf) type = 'husk';
+        if (type === 'skeleton' && (hb === 7 || hb === 19 || hb === 21) && y >= surf) type = 'stray';
+        if (type === 'zombie' && w.getBlock(x, y, z) === B.water) type = 'drowned';
+        if (y < 30 && Math.random() < 0.04) type = 'silverfish';
+        if (hb === 16) continue; // mushroom islands are safe
         if (type === 'enderman' && (w.getBlock(x, y + 2, z))) continue;
         this.spawnMob(type, x + 0.5, y, z + 0.5);
       } else if (this.dim === 'nether') {
@@ -975,7 +1021,15 @@ class Game {
             const r = Math.random();
             const open = !w.getBlock(x, y + 4, z) && !w.getBlock(x + 2, y + 2, z) && !w.getBlock(x - 2, y + 2, z);
             const fortress = w.getBlock(x, y - 1, z) === B.nether_bricks;
-            const type = fortress ? (r < 0.6 ? 'blaze' : 'zombified_piglin') : r < 0.12 && open ? 'ghast' : r < 0.2 ? 'blaze' : 'zombified_piglin';
+            const nbiome = w.biomeAt(x, z);
+            const onLava = w.getBlock(x, y - 1, z) === B.lava;
+            let type = fortress ? (r < 0.45 ? 'blaze' : r < 0.85 ? 'charred_skeleton' : 'magma_blob') : r < 0.12 && open ? 'ghast' : r < 0.18 ? 'magma_blob' : 'zombified_piglin';
+            if (!fortress && nbiome === 22) type = r < 0.4 ? 'hellboar' : r < 0.8 ? 'ash_goblin' : 'zombified_piglin';
+            if (!fortress && nbiome === 23) type = r < 0.85 ? 'enderman' : 'lava_wader';
+            if (!fortress && nbiome === 24) type = r < 0.5 ? 'skeleton' : r < 0.8 ? 'ghast' : 'enderman';
+            if (!fortress && nbiome === 25) type = r < 0.7 ? 'magma_blob' : 'ghast';
+            if (!fortress && nbiome === 12 && r > 0.85) type = 'ash_goblin';
+            if (onLava) type = 'lava_wader';
             this.spawnMob(type, x + 0.5, type === 'ghast' ? y + 3 : y, z + 0.5);
             break;
           }
@@ -1568,6 +1622,7 @@ class Game {
   tick() {
     // fixed-rate world tick (20 tps)
     this.time++;
+    if (this.time % 24000 === 0) this.daysAwake = (this.daysAwake ?? 0) + 1;
     this.world.tick();
     this.redstone?.update();
     if (this.world.tickCount % 2 === 0) this.tickFurnaces();
