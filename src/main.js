@@ -592,6 +592,23 @@ class Game {
     for (const e of this.entities) if (e instanceof Mob && !e.dead) { const d = e.pos.distanceTo(pos); if (d < 4) e.applyPotion(scaled(d)); }
   }
 
+  spawnItemAt(x, y, z, stack) {
+    const e = new ItemEntity(this, x, y, z, copyStack(stack));
+    this.addEntity(e);
+    return e;
+  }
+  launchFirework(x, y, z) {
+    const colors = [0xff4040, 0x40ff60, 0x4080ff, 0xffe040, 0xff60ff, 0x60ffff];
+    const c = new THREE.Color(colors[Math.floor(Math.random() * colors.length)]);
+    const start = new THREE.Vector3(x, y, z);
+    this.sfx('throw');
+    setTimeout(() => {
+      const top = start.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2, 14 + Math.random() * 6, (Math.random() - 0.5) * 2));
+      for (let i = 0; i < 60; i++) { const d = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().multiplyScalar(6 + Math.random() * 4); this.particles.spawn(top.x, top.y, top.z, c, d, 1.2 + Math.random(), 0.12, 2); }
+      this.sfx('explode');
+    }, 900);
+    for (let i = 0; i < 14; i++) setTimeout(() => this.particles.spawn(x, y + i * 1.2, z, new THREE.Color(0xffd080), new THREE.Vector3(0, -1, 0), 0.4, 0.08, 0), i * 60);
+  }
   spawnXP(x, y, z, amount) {
     amount = Math.round(amount);
     while (amount > 0) {
@@ -1582,6 +1599,7 @@ class Game {
         p.updateUse(dt, this.mouse.right);
       } else { p.mining = null; if (p.using) p.updateUse(dt, false); }
       for (const e of this.entities) { e.update(dt); e.sync(); }
+      if (p.vehicle && !p.vehicle.remove) p.pos.copy(p.vehicle.seat ? p.vehicle.seat() : p.vehicle.pos.clone().add(new THREE.Vector3(0, p.vehicle.h * 0.75, 0)));
       for (const e of this.entities) if (e.remove) { this.scene.remove(e.mesh); disposeTree(e.mesh); if (e instanceof Mob && e.dead) this.stats.kills++; }
       this.entities = this.entities.filter((e) => !e.remove);
       this.pickupItems();

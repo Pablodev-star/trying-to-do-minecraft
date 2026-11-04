@@ -242,6 +242,10 @@ block('note_block', 'Bloque musical', { hardness: 0.8, tool: 'axe', sound: 'wood
 block('daylight_detector', 'Sensor de luz solar', { tex: T('daylight_top', 'daylight_side'), render: 'box', box: [0, 0, 0, 16, 6, 16], opaque: false, hardness: 0.2, tool: 'axe', sound: 'wood' });
 block('target', 'Diana', { tex: T('target_top', 'target_side'), hardness: 0.5, tool: 'hoe', sound: 'grass' });
 block('iron_door', 'Puerta de hierro', { tex: 'iron_door_bottom', render: 'box', shape: 'door', opaque: false, hardness: 5, tool: 'pickaxe', needsTool: true, orient: true });
+block('rail', 'Raíl', { tex: 'rail', render: 'box', shape: 'rail', pass: 'cutout', solid: false, opaque: false, hardness: 0.7, tool: 'pickaxe' });
+block('powered_rail', 'Raíl propulsor', { tex: 'powered_rail', render: 'box', shape: 'rail', pass: 'cutout', solid: false, opaque: false, hardness: 0.7, tool: 'pickaxe' });
+block('detector_rail', 'Raíl detector', { tex: 'detector_rail', render: 'box', shape: 'rail', pass: 'cutout', solid: false, opaque: false, hardness: 0.7, tool: 'pickaxe' });
+block('activator_rail', 'Raíl activador', { tex: 'activator_rail', render: 'box', shape: 'rail', pass: 'cutout', solid: false, opaque: false, hardness: 0.7, tool: 'pickaxe' });
 block('spawner', 'Generador de monstruos', { render: 'cube', pass: 'cutout', opaque: false, hardness: 5, tool: 'pickaxe', needsTool: true, drops: null, light: 0 });
 block('path', 'Camino de tierra', { tex: T('path_top', 'path_side', 'dirt'), render: 'box', box: [0, 0, 0, 16, 15, 16], pass: 'opaque', opaque: false, hardness: 0.65, tool: 'shovel', drops: 'dirt', sound: 'grass' });
 block('fire', 'Fuego', { render: 'cross', solid: false, opaque: false, hardness: 0, noItem: true, drops: null, light: 15, replaceable: true });
@@ -303,6 +307,13 @@ item('water_bucket', 'Cubo de agua', { stack: 1 });
 item('lava_bucket', 'Cubo de lava', { stack: 1 });
 item('milk_bucket', 'Cubo de leche', { stack: 1, food: [0, 0], milk: true });
 item('glass_bottle', 'Frasco de cristal');
+for (const [w, n] of [['oak', 'roble'], ['spruce', 'abeto'], ['birch', 'abedul'], ['jungle', 'jungla'], ['acacia', 'acacia']]) item(`${w}_boat`, `Barca de ${n}`, { stack: 1, boat: w });
+item('minecart', 'Vagoneta', { stack: 1 });
+item('fishing_rod', 'Caña de pescar', { kind: 'tool', stack: 1, toolType: 'rod', durability: 64, damage: 1 });
+item('elytra', 'Élitros', { kind: 'armor', stack: 1, slot: 1, armor: 0, durability: 432 });
+item('firework_rocket', 'Cohete de fuegos artificiales');
+item('carrot_on_a_stick', 'Caña con zanahoria', { kind: 'tool', stack: 1, toolType: 'carrot_stick', durability: 25 });
+item('lead', 'Rienda');
 item('potion', 'Poción', { stack: 1, kind: 'potion' });
 item('splash_potion', 'Poción arrojadiza', { stack: 1, kind: 'potion', splash: true });
 item('experience_bottle', 'Frasco de experiencia');
@@ -315,7 +326,7 @@ const FOOD = [
   ['cooked_porkchop', 'Chuleta de cerdo cocinada', 8, 12.8], ['beef', 'Filete crudo', 3, 1.8], ['cooked_beef', 'Filete', 8, 12.8],
   ['chicken', 'Pollo crudo', 2, 1.2], ['cooked_chicken', 'Pollo asado', 6, 7.2], ['mutton', 'Cordero crudo', 2, 1.2], ['cooked_mutton', 'Cordero asado', 6, 9.6],
   ['rotten_flesh', 'Carne podrida', 4, 0.8], ['carrot', 'Zanahoria', 3, 3.6], ['potato', 'Patata', 1, 0.6], ['baked_potato', 'Patata asada', 5, 6],
-  ['melon_slice', 'Rodaja de sandía', 2, 1.2], ['mushroom_stew', 'Estofado de champiñones', 6, 7.2],
+  ['melon_slice', 'Rodaja de sandía', 2, 1.2], ['cod', 'Bacalao crudo', 2, 0.4], ['cooked_cod', 'Bacalao asado', 5, 6], ['salmon', 'Salmón crudo', 2, 0.4], ['cooked_salmon', 'Salmón asado', 6, 9.6], ['tropical_fish', 'Pez tropical', 1, 0.2], ['pufferfish', 'Pez globo', 1, 0.2], ['rabbit', 'Conejo crudo', 3, 1.8], ['cooked_rabbit', 'Conejo asado', 5, 6], ['cookie', 'Galleta', 2, 0.4], ['pumpkin_pie', 'Pastel de calabaza', 8, 4.8], ['sweet_berries', 'Bayas dulces', 2, 0.4], ['dried_kelp', 'Alga seca', 1, 0.6], ['beetroot', 'Remolacha', 1, 1.2], ['honey_bottle', 'Frasco de miel', 6, 1.2], ['mushroom_stew', 'Estofado de champiñones', 6, 7.2],
 ];
 for (const [n, d, h, s] of FOOD) item(n, d, { food: [h, s], stack: n === 'mushroom_stew' ? 1 : 64 });
 const MOB_N = {
@@ -455,6 +466,17 @@ shaped('barrel', 1, ['psp', 'p p', 'psp'], { p: '#planks', s: 'oak_slab' });
 shaped('composter', 1, ['s s', 's s', 'sss'], { s: 'oak_slab' });
 shaped('lectern', 1, ['sss', ' b ', ' s '], { s: 'oak_slab', b: 'bookshelf' });
 shaped('glass_bottle', 3, ['g g', ' g '], { g: 'glass' });
+for (const w of ['oak', 'spruce', 'birch', 'jungle', 'acacia']) shaped(`${w}_boat`, 1, ['p p', 'ppp'], { p: `${w}_planks` });
+shaped('minecart', 1, ['i i', 'iii'], { i: 'iron_ingot' });
+shaped('rail', 16, ['i i', 'isi', 'i i'], { i: 'iron_ingot', s: 'stick' });
+shaped('powered_rail', 6, ['g g', 'gsg', 'grg'], { g: 'gold_ingot', s: 'stick', r: 'redstone' });
+shaped('detector_rail', 6, ['i i', 'ipi', 'iri'], { i: 'iron_ingot', p: 'stone_pressure_plate', r: 'redstone' });
+shaped('activator_rail', 6, ['isi', 'iti', 'isi'], { i: 'iron_ingot', s: 'stick', t: 'redstone_torch' });
+shaped('fishing_rod', 1, ['  s', ' sx', 's x'], { s: 'stick', x: 'string' });
+shapeless('firework_rocket', 3, ['paper', 'gunpowder']);
+shapeless('carrot_on_a_stick', 1, ['fishing_rod', 'carrot']);
+shaped('lead', 2, ['ss ', 'sb ', '  s'], { s: 'string', b: 'slime_ball' });
+shapeless('pumpkin_pie', 1, ['pumpkin', 'sugar', 'egg']);
 shapeless('fermented_spider_eye', 1, ['spider_eye', 'brown_mushroom', 'sugar']);
 shaped('glistering_melon_slice', 1, ['nnn', 'nmn', 'nnn'], { n: 'gold_nugget', m: 'melon_slice' });
 shapeless('magma_cream', 1, ['blaze_powder', 'slime_ball']);
@@ -520,12 +542,13 @@ export function matchRecipe(grid, n) {
   return null;
 }
 
-export const SMOKER_OK = new Set(['porkchop', 'beef', 'chicken', 'mutton', 'potato', 'cod', 'salmon', 'rabbit']);
+export const SMOKER_OK = new Set(['porkchop', 'beef', 'chicken', 'mutton', 'potato', 'cod', 'salmon', 'rabbit', 'kelp']);
 export const SMELTING = {
   raw_iron: 'iron_ingot', raw_gold: 'gold_ingot', raw_copper: 'copper_ingot', iron_ore: 'iron_ingot', gold_ore: 'gold_ingot', copper_ore: 'copper_ingot',
   sand: 'glass', red_sand: 'glass', cobblestone: 'stone', stone: 'smooth_stone', clay_ball: 'brick', clay: 'terracotta', netherrack: 'nether_brick',
   oak_log: 'charcoal', spruce_log: 'charcoal', birch_log: 'charcoal', jungle_log: 'charcoal', acacia_log: 'charcoal',
   porkchop: 'cooked_porkchop', beef: 'cooked_beef', chicken: 'cooked_chicken', mutton: 'cooked_mutton', potato: 'baked_potato',
+  cod: 'cooked_cod', salmon: 'cooked_salmon', rabbit: 'cooked_rabbit', kelp: 'dried_kelp',
   nether_quartz_ore: 'quartz', diamond_ore: 'diamond', emerald_ore: 'emerald', coal_ore: 'coal', lapis_ore: 'lapis_lazuli', ancient_debris: 'netherite_scrap',
 };
 

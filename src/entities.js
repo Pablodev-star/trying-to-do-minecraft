@@ -538,6 +538,24 @@ export class Mob extends Entity {
     const playerTargetable = p.mode === 'survival' && !p.dead;
 
     if (this.type === 'ender_dragon') return this.dragonAI(dt, p);
+    if (p.vehicle === this) {
+      // ridden: horses follow the rider's input, pigs follow a carrot on a stick
+      const inp = this.game.input();
+      const ctrl = this.type === 'horse' ? this.tamed && this.saddled : this.type === 'pig' && p.heldItem() && ITEMS[p.heldItem().id].name === 'carrot_on_a_stick';
+      if (ctrl) {
+        this.yaw = p.yaw + Math.PI;
+        let f = (inp.forward ? 1 : 0) - (inp.back ? 0.4 : 0);
+        if (inp.analog) f = Math.max(-0.4, Math.min(1, -(inp.az ?? 0)));
+        const sp = this.type === 'horse' ? 9 : 3;
+        const dx = -Math.sin(p.yaw) * f * sp, dz = -Math.cos(p.yaw) * f * sp;
+        this.vel.x += (dx - this.vel.x) * Math.min(1, dt * 6); this.vel.z += (dz - this.vel.z) * Math.min(1, dt * 6);
+        if (inp.jump && this.onGround && this.type === 'horse') this.vel.y = 11;
+        if (this.collidedH && this.onGround) this.vel.y = 8.4;
+      }
+      this.physics(dt);
+      this.animate(dt, Math.hypot(this.vel.x, this.vel.z));
+      return;
+    }
 
     if (this.hostile || this.angry) {
       if (!this.target || this.target.dead || this.target.remove) this.target = null;

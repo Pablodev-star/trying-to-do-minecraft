@@ -59,6 +59,7 @@ export function shapeBoxes(b, meta, get) {
     case 'door': return [rotateBox(px([0, 0, 13, 16, 16, 16]), meta & 3)];
     case 'bed': return [px([0, 0, 0, 16, 9, 16])];
     case 'wire': return [px([0, 0, 0, 16, 1, 16])];
+    case 'rail': return [px([0, 0, 0, 16, 1, 16])];
     case 'plate': return [px(meta & 8 ? [1, 0, 1, 15, 0.5, 15] : [1, 0, 1, 15, 1, 15])];
     case 'lever': case 'button': {
       const a = meta & 7;

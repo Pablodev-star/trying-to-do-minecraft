@@ -220,10 +220,10 @@ export class World {
       const b = BLOCKS[id];
       if (b.gravity) { const below = this.getBlock(nx, ny - 1, nz); if (!SOLID[below] && below !== B.water && below !== B.lava || BLOCKS[below].replaceable && below !== B.water && below !== B.lava) this.game?.spawnFallingBlock(nx, ny, nz, id); }
       // plants need support
-      if ((b.render === 'cross' || id === B.torch || id === B.soul_torch || id === B.snow || id === B.ladder) && id !== B.cobweb && id !== B.fire) {
+      if ((b.render === 'cross' || b.shape === 'torch' || b.shape === 'rail' || b.shape === 'wire' || b.shape === 'plate' || id === B.repeater || id === B.powered_repeater || id === B.comparator || id === B.snow || id === B.ladder) && id !== B.cobweb && id !== B.fire) {
         const below = this.getBlock(nx, ny - 1, nz);
         let ok = SOLID[below] || below === B.farmland || below === B.farmland_wet;
-        if ((id === B.torch || id === B.soul_torch) && this.getMeta(nx, ny, nz)) {
+        if (b.shape === 'torch' && this.getMeta(nx, ny, nz)) {
           const m = this.getMeta(nx, ny, nz);
           const [ax, az] = [[0, 1], [-1, 0], [0, -1], [1, 0]][m - 1];
           ok = SOLID[this.getBlock(nx + ax, ny, nz + az)];
@@ -566,8 +566,10 @@ export class World {
           }
           let tex = texFor(b, f, meta);
           if (b.shape === 'door') tex = b.name === 'iron_door' ? (meta & 4 ? 'iron_door_top' : 'iron_door_bottom') : (meta & 4 ? 'door_top' : 'door_bottom');
+          if (b.shape === 'rail') { const rm = b.name === 'rail' ? meta : meta & 7; if (rm >= 6) { tex = 'rail_corner'; UVROT = [3, 0, 1, 2][rm - 6]; } else UVROT = rm === 1 || rm === 2 || rm === 3 ? 1 : 0; }
           if (b.shape === 'wire') { const p = meta & 15; wireTint[0] = 0.32 + 0.68 * p / 15; wireTint[1] = 0.02 + 0.1 * (p / 15) ** 3; wireTint[2] = 0.02; }
-          UVROT = b.topRot && F.side === 'top' ? meta & 3 : 0;
+          if (b.shape !== 'rail') UVROT = b.topRot && F.side === 'top' ? meta & 3 : 0;
+          else if (F.side !== 'top') UVROT = 0;
           if (b.shape === 'bed' && F.side === 'top') tex = meta & 4 ? 'bed_top' : 'bed_foot';
           emitFace(buf, F, x, y, z, tex, b.shape === 'wire' ? wireTint : tint, getP, getL, box, !!b.shape && b.shape !== 'slab' && b.shape !== 'stairs' ? true : b.shape ? false : true, b.render === 'portal', b.render === 'portal' ? 5 : 0);
           UVROT = 0;

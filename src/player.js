@@ -3,6 +3,7 @@ import * as THREE from '../lib/three.module.min.js';
 import { BLOCKS, B, ITEMS, I, maxStack, sameKind, copyStack } from './registry.js';
 import { moveEntity, aabbIntersectsBlocks, rayAABB } from './physics.js';
 import { Mob, Projectile, PrimedTNT, EndCrystal } from './entities.js';
+import { Boat, Minecart, FishingBobber, isRail, shapeRail } from './vehicles.js';
 import { SOLID, rotateBox } from './world.js';
 import { shapeBoxes } from './shapes.js';
 import { enchLevel, protectionFactor } from './enchant.js';
@@ -217,6 +218,28 @@ export class Player {
     const w = this.world;
     const creative = this.mode === 'creative', spectator = this.mode === 'spectator';
     if (!creative && !spectator) this.flying = false;
+    // ---- riding a vehicle or an animal
+    if (this.vehicle) {
+      const v = this.vehicle;
+      if (v.remove || v.dead || (input.sneak && !this.sneakHeldOnMount)) { this.dismount(); return; }
+      if (!input.sneak) this.sneakHeldOnMount = false;
+      if (v.control) v.control(input, dt, this);
+      this.pos.copy(v.seat ? v.seat() : v.pos.clone().add(new THREE.Vector3(0, v.h * 0.75, 0)));
+      this.vel.set(0, 0, 0); this.fallStart = null; this.onGround = true;
+      this.inWater = false; this.headInWater = false;
+      this.tickEffects(dt);
+      if (this.mode === 'survival') this.survivalTick(dt, () => false);
+      return;
+    }
+    // ---- elytra gliding
+    const elytra = this.armor[1] && ITEMS[this.armor[1].id].name === 'elytra' && (this.armor[1].dmg ?? 0) < ITEMS[this.armor[1].id].durability - 1;
+    if (input.jump && !this.prevJump && !this.onGround && !this.flying && elytra && !this.inWater && this.vel.y < 0) { this.gliding = true; this.glideTime = 0; }
+    this.prevJump = input.jump;
+    if (this.gliding) {
+      this.glideTime = (this.glideTime ?? 0) + dt;
+      if (!elytra || (this.onGround && this.glideTime > 0.25) || this.inWater || this.flying) { this.gliding = false; }
+      else { this.glide(dt); return; }
+    }
     if (spectator) this.flying = true;
 
     // look
@@ -368,6 +391,44 @@ export class Player {
     }
   }
 
+  // simplified elytra flight model (per-tick rules scaled by dt)
+  glide(dt) {
+    const k = dt * 20;
+    const look = this.lookDir();
+    const pitch = Math.asin(Math.max(-1, Math.min(1, look.y)));
+    const hl = Math.cos(pitch);
+    const v = this.vel.clone().multiplyScalar(1 / 20); // blocks per tick
+    let hs = Math.hypot(v.x, v.z);
+    v.y += (-0.08 + hl * hl * 0.06) * k;
+    if (v.y < 0 && hl > 0) { const d = v.y * -0.1 * hl * hl * k; v.y += d; v.x += look.x / hl * d; v.z += look.z / hl * d; }
+    if (pitch > 0 && hl > 0) { const d = hs * Math.sin(pitch) * 0.04 * k; v.y += d * 3.2; v.x -= look.x / hl * d; v.z -= look.z / hl * d; }
+    if (hl > 0) { v.x += (look.x / hl * hs - v.x) * 0.1 * k; v.z += (look.z / hl * hs - v.z) * 0.1 * k; }
+    if (this.rocketBoost > 0) { this.rocketBoost -= dt; v.x += (look.x * 1.5 - v.x) * 0.5 * k * 0.2; v.y += (look.y * 1.5 - v.y) * 0.5 * k * 0.2; v.z += (look.z * 1.5 - v.z) * 0.5 * k * 0.2; this.game.particles.spawn(this.pos.x, this.pos.y, this.pos.z, new THREE.Color(0xffd080), new THREE.Vector3(0, 0, 0), 0.4, 0.1, 0); }
+    v.x *= Math.pow(0.99, k); v.y *= Math.pow(0.98, k); v.z *= Math.pow(0.99, k);
+    const before = Math.hypot(v.x, v.z);
+    this.vel.copy(v.multiplyScalar(20));
+    moveEntity(this, this.world, this.vel.x * dt, this.vel.y * dt, this.vel.z * dt, 0);
+    // crashing into walls hurts
+    if (this.collidedH && this.mode === 'survival') { const dmg = before * 10 - 3; if (dmg > 0) this.hurt(dmg, 'fall'); }
+    this.fallStart = null;
+    if (this.onGround && this.glideTime > 0.25) this.gliding = false;
+    this.glideWear = (this.glideWear ?? 0) + dt;
+    if (this.glideWear > 1 && this.mode === 'survival') { this.glideWear = 0; const e = this.armor[1]; e.dmg = (e.dmg ?? 0) + 1; }
+    this.tickEffects(dt);
+    if (this.mode === 'survival') this.survivalTick(dt, () => false);
+  }
+  mount(v) {
+    if (v.rider && v.rider !== this) return;
+    this.vehicle = v; v.rider = this; this.sneakHeldOnMount = true; this.gliding = false; this.flying = false;
+  }
+  dismount() {
+    const v = this.vehicle;
+    if (!v) return;
+    v.rider = null; this.vehicle = null;
+    this.pos.set(v.pos.x + 0.3, v.pos.y + Math.max(1, v.h + 0.1), v.pos.z + 0.3);
+    this.vel.set(0, 0, 0);
+  }
+
   // ---------------------------------------------------------------- targeting
   pick() {
     const eye = this.eyePos(), dir = this.lookDir();
@@ -375,7 +436,7 @@ export class Player {
     const hit = this.world.raycast(eye, dir, reach);
     let ent = null, entDist = Infinity;
     for (const e of this.game.entities) {
-      if (!(e instanceof Mob || e instanceof EndCrystal) || e.dead) continue;
+      if (!(e instanceof Mob || e instanceof EndCrystal || e.isVehicle) || e.dead || e === this.vehicle) continue;
       const hw = e.w / 2;
       const t = rayAABB(eye, dir, { x: e.pos.x - hw, y: e.pos.y, z: e.pos.z - hw }, { x: e.pos.x + hw, y: e.pos.y + e.h, z: e.pos.z + hw });
       if (t != null && t < Math.min(3.5, entDist)) { ent = e; entDist = t; }
@@ -456,6 +517,7 @@ export class Player {
     const dir = this.lookDir().setY(0).normalize();
     if (this.sprinting) dir.multiplyScalar(1.6);
     const kb = enchLevel(held, 'knockback'); if (kb) dir.multiplyScalar(1 + kb * 0.8);
+    if (e.isVehicle) { e.hurt(dmg, this); this.swing = 1; return true; }
     if (e instanceof Mob) e.looting = enchLevel(held, 'looting');
     if (e.hurt(dmg, this, dir)) {
       const fa = enchLevel(held, 'fire_aspect'); if (fa && e.fire != null) e.fire = Math.max(e.fire, 4 * fa);
@@ -476,6 +538,22 @@ export class Player {
     const g = this.game, w = this.world;
     this.placeCooldown = 0.2;
 
+    // vehicles
+    if (p?.entity?.isVehicle && !this.sneaking) { this.mount(p.entity); return; }
+    if (it?.toolType === 'rod') {
+      if (this.bobber) { this.bobber.retract(true); this.swing = 1; g.sfx('throw'); return; }
+      this.bobber = new FishingBobber(g, this, held); g.addEntity(this.bobber); this.swing = 1; g.sfx('throw'); return;
+    }
+    if (it?.name === 'firework_rocket') {
+      if (this.gliding) { this.rocketBoost = 1.2; this.consumeHeld(); g.sfx('fireball'); return; }
+      if (hitBlock(p)) { g.launchFirework(p.block.x + 0.5 + p.block.face[0] * 0.6, p.block.y + 1, p.block.z + 0.5 + p.block.face[2] * 0.6); this.consumeHeld(); return; }
+    }
+    if (it?.boat) {
+      const fh = w.raycast(this.eyePos(), this.lookDir(), 5, true);
+      if (fh) { const b = new Boat(g, fh.x + 0.5, fh.y + 1, fh.z + 0.5, it.boat); b.yaw = this.yaw; g.addEntity(b); this.consumeHeld(); }
+      return;
+    }
+    if (it?.name === 'minecart' && p?.block && isRail(p.block.id)) { g.addEntity(new Minecart(g, p.block.x + 0.5, p.block.y + 0.1, p.block.z + 0.5)); this.consumeHeld(); return; }
     // entity interaction
     if (p && p.entity && p.entity instanceof Mob) {
       const e = p.entity;
@@ -490,6 +568,12 @@ export class Player {
         if (Math.random() < 0.33) { e.tamed = true; e.owner = this; e.angry = false; e.target = null; g.chat('¡Has domesticado un lobo!'); } return;
       }
       if (e.type === 'wolf' && e.tamed && !it) { e.sitting = !e.sitting; return; }
+      if ((e.type === 'horse' || e.type === 'pig') && name === 'saddle' && !e.saddled && !e.baby) { e.saddled = true; this.consumeHeld(); g.sfx('equip'); return; }
+      if (e.type === 'horse' && !e.baby && !this.sneaking && !(e.info.food?.includes(name))) {
+        if (!e.tamed) { this.mount(e); e.tameTries = (e.tameTries ?? 0) + 1; if (Math.random() < 0.15 * e.tameTries) { e.tamed = true; g.chat('¡Has domado un caballo!'); g.particles?.burst(e.pos.x, e.pos.y + 2, e.pos.z, 0xff6080); } else { setTimeout(() => { if (this.vehicle === e) { this.dismount(); g.sfx('hurt_mob'); } }, 1500); } return; }
+        this.mount(e); return;
+      }
+      if (e.type === 'pig' && e.saddled && !this.sneaking) { this.mount(e); return; }
       if (e.info.food && name && e.info.food.includes(name)) {
         if (e.baby) { e.growTimer -= 30; this.consumeHeld(); return; }
         if (e.breedCooldown <= 0 && e.love <= 0) { e.love = 30; this.consumeHeld(); g.sfx('eat'); return; }
@@ -728,7 +812,7 @@ export class Player {
       else if (fy === -1) { if (!SOLID[w.getBlock(x, y + 1, z)]) return; meta = 5; }
       else { meta = fz === 1 ? 3 : fz === -1 ? 1 : fx === 1 ? 2 : 4; if (!SOLID[w.getBlock(x - fx, y, z - fz)]) return; }
     }
-    if ((b.shape === 'plate' || id === B.redstone_wire || id === B.repeater || id === B.comparator) && !SOLID[below]) return;
+    if ((b.shape === 'plate' || b.shape === 'rail' || id === B.redstone_wire || id === B.repeater || id === B.comparator) && !SOLID[below]) return;
     if (b.facing6) {
       const d = this.lookDir();
       if (d.y > 0.75) meta = 0; else if (d.y < -0.75) meta = 1;
@@ -765,6 +849,7 @@ export class Player {
       if (this.blocked(parts)) return;
     }
     w.setBlock(x, y, z, id, meta, extra ? { noUpdate: true } : {});
+    if (isRail(id)) { shapeRail(w, x, y, z); for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (const dy of [-1, 0, 1]) shapeRail(w, x + dx, y + dy, z + dz); }
     if (extra) { w.setBlock(extra.x, extra.y, extra.z, id, extra.meta, { noUpdate: true }); }
     this.consumeHeld();
     this.swing = 1;
@@ -838,3 +923,5 @@ export class Player {
     }
   }
 }
+
+function hitBlock(p) { return !!p?.block; }
