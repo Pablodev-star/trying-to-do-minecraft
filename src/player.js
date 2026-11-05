@@ -181,7 +181,7 @@ export class Player {
   }
   die(source) {
     this.dead = true; this.health = 0;
-    const msg = typeof source === 'string' ? { fall: 'cayó desde muy alto', drown: 'se ahogó', lava: 'intentó nadar en lava', fire: 'ardió hasta morir', starve: 'murió de hambre', void: 'cayó al vacío', cactus: 'murió pinchado', explosion: 'explotó' }[source] ?? 'murió'
+    const msg = typeof source === 'string' ? { fall: 'cayó desde muy alto', drown: 'se ahogó', lava: 'intentó nadar en lava', fire: 'ardió hasta morir', starve: 'murió de hambre', void: 'cayó al vacío', cactus: 'murió pinchado', explosion: 'explotó', lightning: 'fue alcanzado por un rayo' }[source] ?? 'murió'
       : source instanceof Mob ? `fue asesinado por ${source.type}` : 'murió';
     this.deathMessage = `Jugador ${msg}`;
     if (!this.game.keepInventory) {

@@ -1496,6 +1496,8 @@ void main(){ vTw = 0.65 + 0.35 * sin(time * (1.5 + star.y) + star.y * 7.0); vC =
     for (let i = 0; i < 16; i++) this.particles.spawn(x, y + 0.2, z, new THREE.Color(0xd8e0ff), new THREE.Vector3((Math.random() - 0.5) * 6, Math.random() * 5, (Math.random() - 0.5) * 6), 0.4, 0.07, 8, { glow: true });
     // anything standing there gets struck
     for (const e of this.entities) if (e.hurt && !e.dead && Math.hypot(e.pos.x - x, e.pos.z - z) < 2.5 && Math.abs(e.pos.y - y) < 4) { e.hurt(5, null); if (e.fire != null) e.fire = 8; }
+    const pl = this.player;
+    if (pl && !pl.dead && pl.mode === 'survival' && Math.hypot(pl.pos.x - x, pl.pos.z - z) < 2.5 && Math.abs(pl.pos.y - y) < 4) { pl.hurt(5, 'lightning'); if (!pl.hasEffect('fire_resistance')) pl.fire = 8; }
   }
   updateBolts(dt) {
     if (!this.bolts?.length) return;

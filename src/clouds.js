@@ -48,7 +48,7 @@ void main(){
     });
     this.mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.material);
     this.mesh.frustumCulled = false;
-    this.mesh.renderOrder = 2;
+    this.mesh.renderOrder = 0; // before translucent terrain (renderOrder 1), so water and glass tint the clouds behind them
     scene.add(this.mesh);
     this.key = '';
     this.drift = 0;
