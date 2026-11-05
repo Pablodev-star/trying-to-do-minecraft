@@ -36,7 +36,7 @@ function block(name, display, p = {}) {
     slow: p.slow ?? 0,
     shape: p.shape ?? null,             // slab | stairs | fence | pane | torch | door | bed
     base: p.base ?? null,               // full block a double slab turns into
-    anim: p.anim ?? 0,                  // animated texture: 1 water, 2 lava, 3 portal
+    anim: p.anim ?? 0,                  // animated texture: 1 water, 2 lava, 3 portal, 4 glowing pulse
     facing6: p.facing6 ?? false,        // meta 0..5 = facing direction (pistons, observers, dispensers)
     topRot: p.topRot ?? false,          // top texture rotates with meta & 3
   };
@@ -111,7 +111,7 @@ block('smooth_stone', 'Piedra lisa', { hardness: 2, ...pick });
 block('tnt', 'Dinamita', { tex: T('tnt_top', 'tnt_side', 'tnt_bottom'), hardness: 0, sound: 'grass' });
 block('bookshelf', 'Librería', { tex: T('oak_planks', 'bookshelf'), hardness: 1.5, tool: 'axe', drops: () => [['book', 3]], flammable: true, sound: 'wood' });
 block('obsidian', 'Obsidiana', { hardness: 50, ...pick, level: 3 });
-block('crying_obsidian', 'Obsidiana llorosa', { hardness: 50, ...pick, level: 3, light: 10 });
+block('crying_obsidian', 'Obsidiana llorosa', { hardness: 50, ...pick, level: 3, light: 10, anim: 4 });
 block('torch', 'Antorcha', { render: 'box', shape: 'torch', solid: false, opaque: false, hardness: 0, light: 14, sound: 'wood' });
 block('soul_torch', 'Antorcha de almas', { render: 'box', shape: 'torch', solid: false, opaque: false, hardness: 0, light: 10, sound: 'wood' });
 block('crafting_table', 'Mesa de trabajo', { tex: T('crafting_table_top', 'crafting_table_side', 'oak_planks', 'crafting_table_front'), hardness: 2.5, tool: 'axe', orient: true, sound: 'wood' });
@@ -158,19 +158,19 @@ block('oak_door', 'Puerta de roble', { tex: 'door_bottom', render: 'box', shape:
 block('netherrack', 'Netherrack', { hardness: 0.4, ...pick });
 block('soul_sand', 'Arena de almas', { hardness: 0.5, tool: 'shovel', slow: 0.5, sound: 'sand' });
 block('soul_soil', 'Tierra de almas', { hardness: 0.5, tool: 'shovel', sound: 'sand' });
-block('glowstone', 'Piedra luminosa', { hardness: 0.3, light: 15, drops: () => [['glowstone_dust', rnd(2, 4)]], sound: 'glass' });
+block('glowstone', 'Piedra luminosa', { hardness: 0.3, light: 15, anim: 4, drops: () => [['glowstone_dust', rnd(2, 4)]], sound: 'glass' });
 block('nether_portal', 'Portal del Nether', { anim: 3, render: 'portal', pass: 'translucent', solid: false, opaque: false, hardness: -1, light: 11, noItem: true, drops: null });
 block('nether_quartz_ore', 'Mena de cuarzo del Nether', { hardness: 3, ...pick, drops: 'quartz' });
 block('nether_gold_ore', 'Mena de oro del Nether', { hardness: 3, ...pick, drops: () => [['gold_nugget', rnd(2, 6)]] });
 block('ancient_debris', 'Escombros ancestrales', { tex: T('ancient_debris_top', 'ancient_debris_side'), hardness: 30, ...pick, level: 3 });
 block('nether_bricks', 'Ladrillos del Nether', { hardness: 2, ...pick });
 block('red_nether_bricks', 'Ladrillos rojos del Nether', { hardness: 2, ...pick });
-block('magma_block', 'Bloque de magma', { hardness: 0.5, ...pick, light: 3 });
+block('magma_block', 'Bloque de magma', { hardness: 0.5, ...pick, light: 3, anim: 4 });
 block('basalt', 'Basalto', { tex: T('blackstone', 'basalt'), hardness: 1.25, ...pick });
 block('blackstone', 'Piedra negra', { hardness: 1.5, ...pick });
 block('nether_wart_block', 'Bloque de verruga del Nether', { hardness: 1, tool: 'hoe', sound: 'wood' });
 block('crimson_nylium', 'Necilio carmesí', { tex: T('crimson_nylium', 'netherrack'), hardness: 0.4, ...pick, drops: 'netherrack' });
-block('shroomlight', 'Brillongo', { hardness: 1, tool: 'hoe', light: 15, sound: 'wood' });
+block('shroomlight', 'Brillongo', { hardness: 1, tool: 'hoe', light: 15, anim: 4, sound: 'wood' });
 // End
 block('end_stone', 'Piedra del End', { hardness: 3, ...pick });
 block('end_stone_bricks', 'Ladrillos de piedra del End', { hardness: 3, ...pick });
@@ -295,7 +295,7 @@ block('amethyst_block', 'Bloque de amatista', { hardness: 1.5, tool: 'pickaxe', 
 block('amethyst_cluster', 'Racimo de amatista', { render: 'cross', hardness: 1.5, tool: 'pickaxe', light: 5, drops: () => [['amethyst_shard', 4]], sound: 'glass' });
 block('calcite', 'Calcita', { hardness: 0.75, tool: 'pickaxe', needsTool: true });
 block('smooth_basalt', 'Basalto liso', { hardness: 1.25, tool: 'pickaxe', needsTool: true });
-block('sculk', 'Sculk', { hardness: 0.2, tool: 'hoe', sound: 'wool' });
+block('sculk', 'Sculk', { hardness: 0.2, tool: 'hoe', sound: 'wool', anim: 4 });
 block('spawner', 'Generador de monstruos', { render: 'cube', pass: 'cutout', opaque: false, hardness: 5, tool: 'pickaxe', needsTool: true, drops: null, light: 0 });
 block('path', 'Camino de tierra', { tex: T('path_top', 'path_side', 'dirt'), render: 'box', box: [0, 0, 0, 16, 15, 16], pass: 'opaque', opaque: false, hardness: 0.65, tool: 'shovel', drops: 'dirt', sound: 'grass' });
 block('fire', 'Fuego', { render: 'cross', solid: false, opaque: false, hardness: 0, noItem: true, drops: null, light: 15, replaceable: true });

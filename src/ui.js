@@ -742,7 +742,8 @@ export class UI {
         <label>Escala de interfaz: <span id="o-gui-v">${o.guiScale}</span><input type="range" id="o-gui" min="1" max="4" step="0.5" value="${o.guiScale}"></label>
         <button class="mc-btn" id="o-diff">Dificultad: ${{ peaceful: 'Pacífico', easy: 'Fácil', normal: 'Normal', hard: 'Difícil' }[o.difficulty]}</button>
         <button class="mc-btn" id="o-bob">Movimiento de cámara: ${o.bobbing ? 'SÍ' : 'NO'}</button>
-        <button class="mc-btn" id="o-clouds">Nubes: ${o.clouds ? 'SÍ' : 'NO'}</button>
+        <button class="mc-btn" id="o-clouds">Nubes: ${o.clouds ? '3D' : 'NO'}</button>
+        <button class="mc-btn" id="o-particles">Partículas: ${o.particles === false ? 'Mínimas' : 'Todas'}</button>
         <button class="mc-btn" id="o-fancy">Gráficos: ${o.fancy ? 'Detallados' : 'Rápidos'}</button>
         <button class="mc-btn ${o.shaders ? 'on' : ''}" id="o-shaders">Shaders: ${o.shaders ? 'SÍ' : 'NO'}</button>
         <div class="opt-note">Shaders: sombras, agua con reflejos, plantas que se mueven con el viento, rayos de sol y colores cinematográficos. Necesitan un equipo potente.</div>
@@ -757,6 +758,7 @@ export class UI {
     $('#o-diff', m).onclick = () => { const l = ['peaceful', 'easy', 'normal', 'hard']; o.difficulty = l[(l.indexOf(o.difficulty) + 1) % 4]; this.options(back, fromTitle); };
     $('#o-bob', m).onclick = () => { o.bobbing = !o.bobbing; this.options(back, fromTitle); };
     $('#o-clouds', m).onclick = () => { o.clouds = !o.clouds; this.options(back, fromTitle); };
+    $('#o-particles', m).onclick = () => { o.particles = o.particles === false; this.options(back, fromTitle); };
     $('#o-fancy', m).onclick = () => { o.fancy = !o.fancy; this.game.remeshAll(); this.options(back, fromTitle); };
     $('#o-shaders', m).onclick = () => { o.shaders = !o.shaders; if (o.shaders && !this.game.pipeline) { o.shaders = false; this.game.chat('Tu navegador no soporta los shaders.'); } this.game.saveOptions(); this.options(back, fromTitle); };
     $('#o-done', m).onclick = () => { this.game.saveOptions(); back(); };

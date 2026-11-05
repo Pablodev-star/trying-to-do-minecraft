@@ -147,14 +147,14 @@ export const MODELS = {
   spider: [
     part({ n: 'body', s: [10, 8, 12], p: [0, 9, -5], o: [0, 0, -3], c: 0x342d27 }),
     part({ n: 'neck', s: [6, 6, 6], p: [0, 9, 0], o: [0, 0, 0], c: 0x2a241f }),
-    part({ n: 'head', s: [8, 8, 8], p: [0, 9, 3], o: [0, 0, 4], c: 0x342d27, face: (px) => { px(1, 3, 0xd81a1a, 2, 1); px(5, 3, 0xd81a1a, 2, 1); px(2, 2, 0xd81a1a); px(5, 2, 0xd81a1a); } }),
+    part({ n: 'head', s: [8, 8, 8], p: [0, 9, 3], o: [0, 0, 4], c: 0x342d27, face: (px) => { px(1, 3, 0xd81a1a, 2, 1); px(5, 3, 0xd81a1a, 2, 1); px(2, 2, 0xd81a1a); px(5, 2, 0xd81a1a); }, glow: (px) => { px(1, 3, 0xff3a2a, 2, 1); px(5, 3, 0xff3a2a, 2, 1); px(2, 2, 0xff3a2a); px(5, 2, 0xff3a2a); } }),
     ...[0, 1, 2, 3].flatMap((i) => [
       part({ n: 'sleg' + (i * 2), s: [16, 2, 2], p: [-4, 9, 2 - i * 2], o: [-8, 0, 0], c: 0x2a241f, r: [0, (i - 1.5) * 0.35, -0.6] }),
       part({ n: 'sleg' + (i * 2 + 1), s: [16, 2, 2], p: [4, 9, 2 - i * 2], o: [8, 0, 0], c: 0x2a241f, r: [0, -(i - 1.5) * 0.35, 0.6] }),
     ]),
   ],
   enderman: [
-    part({ n: 'head', s: [8, 8, 8], p: [0, 38, 0], o: [0, 4, 0], c: 0x1c2240, face: (px) => { px(1, 3, 0x40f0ff, 6, 1); px(2, 4, 0x20a0c0, 4, 1); } }),
+    part({ n: 'head', s: [8, 8, 8], p: [0, 38, 0], o: [0, 4, 0], c: 0x1c2240, face: (px) => { px(1, 3, 0x40f0ff, 6, 1); px(2, 4, 0x20a0c0, 4, 1); }, glow: (px) => { px(1, 3, 0x60f8ff, 6, 1); px(2, 4, 0x30b8d8, 4, 1); } }),
     part({ n: 'body', s: [8, 12, 4], p: [0, 38, 0], o: [0, -6, 0], c: 0x232a4a }),
     part({ n: 'arm0', s: [2, 30, 2], p: [-5, 36, 0], o: [0, -13, 0], c: 0x1c2240 }), part({ n: 'arm1', s: [2, 30, 2], p: [5, 36, 0], o: [0, -13, 0], c: 0x1c2240 }),
     part({ n: 'leg0', s: [2, 26, 2], p: [-2, 26, 0], o: [0, -13, 0], c: 0x1c2240 }), part({ n: 'leg1', s: [2, 26, 2], p: [2, 26, 0], o: [0, -13, 0], c: 0x1c2240 }),
@@ -341,6 +341,16 @@ export function buildModel(type, scale = 1) {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(p.o[0] / 16, p.o[1] / 16, p.o[2] / 16);
     pivot.add(mesh);
+    if (p.glow) {
+      // glowing eyes: an unlit decal just in front of the face, so they shine in the dark
+      const c = document.createElement('canvas'); c.width = c.height = 8;
+      const g = c.getContext('2d');
+      p.glow((x, y, col, w = 1, h = 1) => { g.fillStyle = '#' + col.toString(16).padStart(6, '0'); g.fillRect(x, y, w, h); });
+      const t = new THREE.CanvasTexture(c); t.magFilter = t.minFilter = THREE.NearestFilter; t.colorSpace = THREE.SRGBColorSpace;
+      const eyes = new THREE.Mesh(new THREE.PlaneGeometry(p.s[0] / 16, p.s[1] / 16), new THREE.MeshBasicMaterial({ map: t, transparent: true, alphaTest: 0.5, fog: false }));
+      eyes.position.set(0, 0, p.s[2] / 32 + 0.002);
+      mesh.add(eyes);
+    }
     root.add(pivot);
     parts[p.n] = pivot;
     pivot.userData.mesh = mesh;

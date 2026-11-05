@@ -4,7 +4,8 @@ import { BLOCKS, B, ITEMS, I, sameKind } from './registry.js';
 import { moveEntity, aabbIntersectsBlocks } from './physics.js';
 import { buildModel, setTint } from './models.js';
 import { atlasCanvas, tileUV, itemSpriteCanvas, tileCanvas } from './textures.js';
-import { SOLID } from './world.js';
+import { SOLID, worldUniforms } from './world.js';
+import { makeFireShell } from './shaders.js';
 import { PROFESSIONS, JOB_BLOCK, initVillager, restock } from './villagers.js';
 
 const GRAV = 32;
@@ -93,7 +94,43 @@ export class Entity {
   }
   aabb() { const hw = this.w / 2; return { min: new THREE.Vector3(this.pos.x - hw, this.pos.y, this.pos.z - hw), max: new THREE.Vector3(this.pos.x + hw, this.pos.y + this.h, this.pos.z + hw) }; }
   update(dt) { this.age += dt; }
-  sync() { this.mesh.position.copy(this.pos); }
+  sync() { this.mesh.position.copy(this.pos); if (this.shadowR) this.updateShadow(); }
+  /** round blob shadow on the ground below (hidden when the shader pack draws real shadows) */
+  updateShadow() {
+    if (!this.shadow) {
+      this.shadow = new THREE.Mesh(SHADOW_GEO, new THREE.MeshBasicMaterial({ map: shadowTexture(), transparent: true, depthWrite: false, opacity: 0.5, polygonOffset: true, polygonOffsetFactor: -1 }));
+      this.shadow.rotation.x = -Math.PI / 2;
+      this.shadow.scale.setScalar(this.shadowR * 2);
+      this.shadow.renderOrder = 1;
+      this.mesh.add(this.shadow);
+    }
+    const w = this.world;
+    let top = null;
+    const fx = Math.floor(this.pos.x), fz = Math.floor(this.pos.z), fy = Math.floor(this.pos.y + 0.01);
+    for (let y = fy; y >= fy - 3; y--) {
+      const id = w.getBlock(fx, y, fz);
+      if (SOLID[id]) { const bb = BLOCKS[id].shape === 'slab' && !(w.getMeta(fx, y, fz) & 8) ? 0.5 : 1; top = y + bb; if (top > this.pos.y + 0.01) top = y + 1; break; }
+    }
+    const h = top == null ? 9 : this.pos.y - top;
+    const vis = !this.dead && h < 3 && h > -0.2 && worldUniforms.shaderOn.value < 0.5 && !this.inWater;
+    this.shadow.visible = vis;
+    if (!vis) return;
+    this.shadow.position.y = top - this.pos.y + 0.015;
+    this.shadow.material.opacity = 0.5 * (1 - h / 3) * Math.min(1, this.lightAt() * 1.5);
+  }
+}
+
+const SHADOW_GEO = new THREE.PlaneGeometry(1, 1);
+let shadowTex = null;
+function shadowTexture() {
+  if (shadowTex) return shadowTex;
+  const c = document.createElement('canvas'); c.width = c.height = 32;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(16, 16, 2, 16, 16, 16);
+  grd.addColorStop(0, 'rgba(0,0,0,0.85)'); grd.addColorStop(0.6, 'rgba(0,0,0,0.55)'); grd.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, 32, 32);
+  shadowTex = new THREE.CanvasTexture(c);
+  return shadowTex;
 }
 
 // ---------------------------------------------------------------- item entity
@@ -101,7 +138,7 @@ export class ItemEntity extends Entity {
   constructor(game, x, y, z, stack) {
     super(game, x, y, z);
     this.stack = stack;
-    this.w = 0.25; this.h = 0.25;
+    this.w = 0.25; this.h = 0.25; this.shadowR = 0.18;
     this.pickupDelay = 0.6;
     this.stepHeight = 0;
     const m = makeItemMesh(stack.id, 0.4);
@@ -357,6 +394,7 @@ export class Mob extends Entity {
     this.baby = !!opts.baby;
     const sc = this.baby ? 0.5 : type === 'slime' || type === 'magma_blob' ? this.size / 2 : 1;
     this.w = info.w * sc; this.h = info.h * sc;
+    this.shadowR = info.flier || type === 'ghast' || type === 'ender_dragon' ? 0 : Math.min(1.6, Math.max(0.25, this.w * 0.75));
     this.maxHealth = type === 'slime' || type === 'magma_blob' ? this.size * this.size * 4 : info.hp;
     this.health = this.maxHealth;
     this.hostile = HOSTILE.has(type) && !info.neutral;
@@ -621,11 +659,18 @@ export class Mob extends Entity {
     super.update(dt);
     const p = this.game.player;
     if (this.hurtTime > 0) this.hurtTime -= dt;
+    // flames on burning mobs
+    const burning = this.fire > 0 && !this.inWater && !this.info.fireImmune;
+    if (burning && !this.fireMesh) { this.fireMesh = makeFireShell(worldUniforms, this.w, this.h); this.mesh.add(this.fireMesh); }
+    if (this.fireMesh) {
+      this.fireMesh.visible = burning;
+      if (burning && Math.random() < dt * 5) this.game.particles?.spawn(this.pos.x + (Math.random() - 0.5) * this.w, this.pos.y + this.h * (0.6 + Math.random() * 0.5), this.pos.z + (Math.random() - 0.5) * this.w, new THREE.Color(0x404040), new THREE.Vector3(0, 0.8, 0), 1, 0.1, -0.2, { drag: 0.6, grow: true, collide: false });
+    }
     if (this.dead) {
       this.deathTime += dt;
       this.model.rotation.z = Math.min(Math.PI / 2, this.deathTime * 4);
       setTint(this.mats, 1, 0.3, 0.3);
-      if (this.deathTime > (this.type === 'ender_dragon' ? 4 : 1)) this.remove = true;
+      if (this.deathTime > (this.type === 'ender_dragon' ? 4 : 1)) { this.remove = true; this.game.particles?.poof(this.pos.x, this.pos.y, this.pos.z, this.info.w, this.info.h); }
       if (this.type === 'ender_dragon') { this.pos.y += dt * 6; this.model.rotation.z = 0; this.model.rotation.y += dt * 2; }
       return;
     }

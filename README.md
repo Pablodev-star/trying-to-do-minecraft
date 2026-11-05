@@ -91,6 +91,18 @@ En el inventario: clic izquierdo para coger o dejar, clic derecho para la mitad 
 - **Estructuras**: templos del desierto y la jungla, iglús, cabañas de bruja, barcos hundidos, portales en ruinas, torres de bandidos, minas abandonadas, bastiones, fortalezas ampliadas y ciudades del End con élitros.
 - **Mobs**: zorros, conejos, gatos, loros, pandas, abejas, cabras, ranas, tortugas, osos polares, llamas, calamares, peces y delfines; variantes de zombi y esqueleto; y criaturas de diseño propio: espectro nocturno, bandidos, anguila abisal, centinela de púrpur, trasgo de ceniza (trueque de oro), jabalí infernal, zancudo de lava, esqueleto calcinado y el jefe **Coloso de ceniza** (arena de almas en T + 3 cráneos calcinados).
 
+## Más detalle visual
+
+- **Fuego animado**: llamas pixeladas que se mueven solas (calculadas en el shader), cuatro láminas por bloque, fuego azul de almas sobre arena y tierra de almas, humo y chispas. Los mobs que arden muestran llamas encima, y si ardes tú aparecen llamas en los bordes de la pantalla.
+- **Nubes 3D**: nubes de bloques con volumen que se desplazan despacio, con caras sombreadas y que se ven desde abajo, desde dentro y desde encima. Se oscurecen de noche y con lluvia.
+- **Cielo**: luna con 8 fases (una por noche), estrellas de distintos tamaños y colores que titilan, halo alrededor del sol y rayos visibles con ramificaciones durante las tormentas.
+- **Partículas ambientales**: llama y humo en antorchas, chispas que saltan de la lava, hornos encendidos que echan humo, partículas de portal, vara del End, obsidiana llorosa, generadores, glifos que vuelan de las estanterías a la mesa de encantar, gotas bajo bloques con agua o lava encima, hojas que caen (pétalos rosas en los cerezos), espuma al pie de las cascadas, esporas en los campos de hongos, sculk y amatista.
+- **Ambiente por bioma**: esporas rojas o turquesas en los bosques del Nether, ceniza en el valle de almas y en los deltas de basalto, niebla de color distinto en cada bioma del Nether, partículas flotando bajo el agua y luciérnagas de noche en pantanos, manglares y bosques oscuros.
+- **Efectos del jugador**: polvo al correr y al aterrizar, esquirlas al picar un bloque, estrellas en los golpes críticos y encantados, burbujas al bucear, salpicaduras al caer al agua, salpicaduras de lluvia en el suelo, nube blanca al morir un mob y la cámara se inclina al recibir daño.
+- **Detalles de los mobs**: sombra redonda bajo mobs y objetos (sin shaders), ojos brillantes en arañas y endermen.
+- **Bloques que brillan**: el magma, la obsidiana llorosa, la piedra luminosa, el brillongo y el sculk laten suavemente. Con shaders, la luz de las antorchas parpadea.
+- En Opciones: **Nubes** (3D / NO) y **Partículas** (Todas / Mínimas).
+
 ## Comandos (requieren trucos activados)
 
 `/gamemode`, `/time set`, `/weather`, `/tp`, `/give`, `/summon`, `/kill`, `/xp`, `/difficulty`, `/spawnpoint`, `/locate [village]`, `/setblock`, `/clear`, `/heal`, `/dimension`, `/gamerule keepInventory true`, `/seed`, `/help`
@@ -102,7 +114,9 @@ index.html, style.css
 lib/three.module.min.js   Three.js r160 (MIT)
 src/main.js       bucle de juego, menús, reglas, portales, explosiones, spawneo, guardado
 src/world.js      chunks, luz, mallado, fluidos, ticks aleatorios
-src/shaders.js    shaders del mundo, sombras y post-procesado
+src/shaders.js    shaders del mundo, fuego animado, sombras y post-procesado
+src/clouds.js     nubes 3D de bloques
+src/ambient.js    partículas ambientales y efectos del jugador
 src/shapes.js     formas de losas, escaleras, vallas, puertas...
 src/worldgen.js   generación del Overworld, el Nether y el End
 src/registry.js   bloques, ítems, recetas, fundición

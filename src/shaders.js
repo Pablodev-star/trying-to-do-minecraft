@@ -6,6 +6,57 @@ import * as THREE from '../lib/three.module.min.js';
 export const SHADOW_SIZE = 2048;
 export const SHADOW_RANGE = 72;
 
+// ---------------------------------------------------------------- animated fire
+// Pixel-art flames computed per fragment: two scrolling value-noise layers shaped into
+// tongues, quantised to 16x16 pixels and ~14 frames per second. soul = blue palette.
+export const FIRE_GLSL = /* glsl */`
+float fHash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float fNoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(fHash(i), fHash(i + vec2(1.0, 0.0)), f.x), mix(fHash(i + vec2(0.0, 1.0)), fHash(i + vec2(1.0, 1.0)), f.x), f.y); }
+vec4 flame(float u, float h, float seed, float soul, float t){
+  u = (floor(clamp(u, 0.0, 0.999) * 16.0) + 0.5) / 16.0;
+  h = (floor(clamp(h, 0.0, 0.999) * 16.0) + 0.5) / 16.0;
+  float tt = floor(t * 14.0) / 14.0;
+  float n = fNoise(vec2(u * 5.0 + seed * 7.3, h * 4.0 - tt * 4.2)) * 0.6 + fNoise(vec2(u * 11.0 - seed * 3.1, h * 8.0 - tt * 7.5)) * 0.4;
+  float v = n * 1.35 + 0.32 - h * 1.3 - pow(abs(u - 0.5) * 2.0, 2.0) * 0.4;
+  if (v < 0.06) return vec4(0.0);
+  vec3 c = soul > 0.5
+    ? (v > 0.5 ? vec3(0.8, 1.0, 1.0) : v > 0.3 ? vec3(0.25, 0.88, 0.96) : v > 0.16 ? vec3(0.06, 0.6, 0.85) : vec3(0.03, 0.32, 0.6))
+    : (v > 0.52 ? vec3(1.0, 0.96, 0.7) : v > 0.32 ? vec3(1.0, 0.7, 0.14) : v > 0.17 ? vec3(0.96, 0.4, 0.06) : vec3(0.72, 0.17, 0.04));
+  return vec4(c, 1.0);
+}`;
+
+/** Material for flames on burning mobs and the first-person overlay. */
+export function makeFireMaterial(uniforms, soul = 0) {
+  return new THREE.ShaderMaterial({
+    uniforms: { time: uniforms.time, seed: { value: Math.random() * 10 }, soul: { value: soul }, opacity: { value: 0.95 } },
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    vertexShader: /* glsl */`varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: /* glsl */`uniform float time; uniform float seed; uniform float soul; uniform float opacity; varying vec2 vUv;
+${FIRE_GLSL}
+void main(){ vec4 f = flame(fract(vUv.x * 2.0), vUv.y, seed + floor(vUv.x * 2.0), soul, time); if (f.a < 0.5) discard; gl_FragColor = vec4(f.rgb * 1.1, opacity);
+  #include <colorspace_fragment>
+}`,
+  });
+}
+
+let sharedFire = null;
+/** Four flame sheets wrapped around a w x h body (burning mobs / player model). */
+export function makeFireShell(uniforms, w, h) {
+  sharedFire ??= makeFireMaterial(uniforms);
+  const g = new THREE.Group();
+  const W = w * 1.15, Hh = h * 1.15;
+  for (let i = 0; i < 4; i++) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(W, Hh), sharedFire);
+    const a = (i * Math.PI) / 2;
+    m.position.set(Math.sin(a) * W / 2, Hh / 2 - h * 0.04, Math.cos(a) * W / 2);
+    m.rotation.y = a;
+    m.renderOrder = 3;
+    g.add(m);
+  }
+  return g;
+}
+
 // ---------------------------------------------------------------- chunk material
 export function chunkShaders(alphaTest, translucent) {
   const vert = /* glsl */`
@@ -44,8 +95,9 @@ uniform vec3 skyColor; uniform vec3 cameraPos; uniform float shadowStrength; uni
 varying vec2 vUv; varying vec2 vLight; varying vec3 vColor; varying float vDist;
 varying vec3 vWorldPos; varying vec3 vNormal; varying vec4 vShadow; varying float vMat;
 
+${FIRE_GLSL}
 vec2 animUv(vec2 uv) {
-  if (vMat < 2.5) return uv;
+  if (vMat < 2.5 || vMat > 5.5) return uv;
   vec2 tile = floor(uv * 32.0 + 1e-4);
   vec2 loc = uv * 32.0 - tile;
   if (vMat < 3.5) loc = fract(loc + vec2(time * 0.04, time * 0.07));                  // water flow
@@ -69,7 +121,17 @@ float shadowAt(vec3 n) {
 
 void main(){
   vec4 t = texture2D(map, animUv(vUv));
+  if (vMat > 5.5 && vMat < 7.5) {   // fire (6) / soul fire (7): procedural animated flames
+    vec2 cell = floor(vWorldPos.xz + 0.5);
+    t = flame(fract(vUv.x * 64.0), vWorldPos.y - floor(vWorldPos.y - 0.002), fHash(cell) * 10.0 + mod(floor(vUv.x * 64.0), 2.0), vMat > 6.5 ? 1.0 : 0.0, time);
+  }
   if (t.a < ${alphaTest.toFixed(2)}) discard;
+  if (vMat > 7.5 && vMat < 8.5) {   // glowing blocks: slow, uneven pulse of the bright pixels
+    vec2 cell = floor(vWorldPos.xz + vNormal.xz * -0.01) + floor(vWorldPos.y - vNormal.y * 0.01);
+    float lum = dot(t.rgb, vec3(0.3, 0.59, 0.11));
+    float pulse = 0.5 + 0.5 * sin(time * 1.6 + fHash(cell) * 6.28 + fHash(floor(fract(vUv * 32.0) * 16.0)) * 2.0);
+    t.rgb *= 1.0 + (pulse - 0.4) * 0.35 * smoothstep(0.25, 0.7, lum);
+  }
   float s = vLight.x * daylight;
   float b = vLight.y;
   if (shaderOn < 0.5) {
@@ -93,10 +155,12 @@ void main(){
     vec3 amb = mix(vec3(0.05, 0.06, 0.09), mix(skyColor, vec3(0.88, 0.92, 1.0), 0.6) * 0.62, clamp(daylight * 1.15, 0.0, 1.0)) * (0.3 + 0.7 * sky * sky);
     amb = max(amb, vec3(ambient * 0.55));
     vec3 sun = sunColor * ndl * sh * sky * sky * (1.0 - rain * 0.7);
-    vec3 torch = vec3(1.0, 0.72, 0.42) * pow(b, 2.0) * 1.35;
+    float flick = 0.94 + 0.06 * fNoise(vec2(time * 6.0, floor(vWorldPos.x * 0.25) + floor(vWorldPos.z * 0.25) * 7.0));
+    vec3 torch = vec3(1.0, 0.72, 0.42) * pow(b, 2.0) * 1.35 * flick;
     vec3 col = albedo * (amb + sun * 1.25 + torch);
     // emissive blocks (lava, glow, portal)
-    if (vMat > 3.5) col = t.rgb * vColor * (vMat < 4.5 ? 1.6 : 1.3);
+    if (vMat > 7.5 && vMat < 8.5) col = mix(col, t.rgb * vColor * 1.25, smoothstep(0.3, 0.7, dot(t.rgb, vec3(0.3, 0.59, 0.11))));
+    else if (vMat > 3.5) col = t.rgb * vColor * (vMat < 4.5 ? 1.6 : 1.3);
     float alpha = t.a;
     if (vMat > 2.5 && vMat < 3.5) {
       // water: wave normal, fresnel reflection of the sky, sun glint

@@ -13,10 +13,12 @@ import { hashString } from './noise.js';
 import { blockBoxesAt } from './shapes.js';
 import { enchLevel, ENCHANTS } from './enchant.js';
 import { brew, potionEffects } from './effects.js';
-import { ShaderPipeline, makeSkyDome } from './shaders.js';
+import { ShaderPipeline, makeSkyDome, makeFireMaterial, makeFireShell } from './shaders.js';
 import { Redstone, DIRS6 } from './redstone.js';
 import { TouchControls, IS_TOUCH } from './touch.js';
 import { migrateSave } from './legacy.js';
+import { Clouds } from './clouds.js';
+import { Ambient } from './ambient.js';
 
 const $ = (s) => document.querySelector(s);
 const TPS = 20;
@@ -43,6 +45,7 @@ class Game {
     const hl = new THREE.DirectionalLight(0xffffff, 0.5); hl.position.set(-0.5, 1, 0.8); this.handScene.add(hl);
     this.entities = [];
     this.particles = new Particles(this);
+    this.ambientFx = new Ambient(this);
     this.options = loadOptions();
     this.applyGuiScale();
     audio.volume = this.options.volume / 100;
@@ -115,32 +118,57 @@ class Game {
     g.fillStyle = '#fff8a0'; g.fillRect(2, 2, 12, 12); g.fillStyle = '#ffffe8'; g.fillRect(4, 4, 8, 8);
     const sunT = new THREE.CanvasTexture(sunC); sunT.magFilter = THREE.NearestFilter;
     this.sun = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshBasicMaterial({ map: sunT, transparent: true, fog: false, depthWrite: false }));
-    const moonC = document.createElement('canvas'); moonC.width = moonC.height = 16;
-    g = moonC.getContext('2d');
-    g.fillStyle = '#d8dcf0'; g.fillRect(3, 3, 10, 10); g.fillStyle = '#a8acc8'; g.fillRect(5, 5, 2, 2); g.fillRect(9, 8, 3, 2); g.fillRect(6, 10, 2, 1);
-    const moonT = new THREE.CanvasTexture(moonC); moonT.magFilter = THREE.NearestFilter;
-    this.moon = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshBasicMaterial({ map: moonT, transparent: true, fog: false, depthWrite: false }));
+    // soft halo behind the sun
+    const haloC = document.createElement('canvas'); haloC.width = haloC.height = 64;
+    g = haloC.getContext('2d');
+    const grd = g.createRadialGradient(32, 32, 4, 32, 32, 32); grd.addColorStop(0, 'rgba(255,240,190,0.55)'); grd.addColorStop(0.4, 'rgba(255,220,150,0.18)'); grd.addColorStop(1, 'rgba(255,200,120,0)');
+    g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
+    this.sunHalo = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(haloC), transparent: true, fog: false, depthWrite: false, blending: THREE.AdditiveBlending }));
+    this.sunHalo.position.z = -1;
+    this.sun.add(this.sunHalo);
+    // moon: eight phases (full -> new -> full), one per in-game night, with craters
+    this.moonTex = [];
+    for (let ph = 0; ph < 8; ph++) {
+      const c = document.createElement('canvas'); c.width = c.height = 16;
+      const mg = c.getContext('2d');
+      mg.fillStyle = '#d8dcf0'; mg.fillRect(3, 3, 10, 10); mg.fillRect(4, 2, 8, 12); mg.fillRect(2, 4, 12, 8);
+      mg.fillStyle = '#b4b8d0'; mg.fillRect(5, 5, 2, 2); mg.fillRect(9, 8, 3, 2); mg.fillRect(6, 10, 2, 1); mg.fillRect(10, 4, 1, 1); mg.fillRect(4, 8, 1, 2);
+      // shadowed part: 0 full, 4 new; waning covers from the right, waxing from the left
+      const k = ph <= 4 ? ph : 8 - ph, cover = Math.round((k / 4) * 14);
+      mg.globalCompositeOperation = 'destination-out';
+      if (cover) { if (ph <= 4) mg.fillRect(16 - 1 - cover, 0, cover + 1, 16); else mg.fillRect(0, 0, cover + 1, 16); }
+      mg.globalCompositeOperation = 'source-over';
+      if (ph === 4) { mg.fillStyle = 'rgba(80,86,120,0.35)'; mg.fillRect(3, 3, 10, 10); }
+      const t = new THREE.CanvasTexture(c); t.magFilter = THREE.NearestFilter; this.moonTex.push(t);
+    }
+    this.moon = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshBasicMaterial({ map: this.moonTex[0], transparent: true, fog: false, depthWrite: false }));
+    // stars: varied size and colour, twinkling in a shader
     const starGeo = new THREE.BufferGeometry();
-    const sp = [];
-    for (let i = 0; i < 1500; i++) {
+    const sp = [], ss = [], sc = [];
+    for (let i = 0; i < 1800; i++) {
       const v = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.2, Math.random() - 0.5).normalize().multiplyScalar(400);
       sp.push(v.x, v.y, v.z);
+      ss.push(Math.random() < 0.08 ? 2.6 : 1 + Math.random() * 1.2, Math.random() * 6.28);
+      const tint = Math.random(); sc.push(tint < 0.15 ? 0.75 : 1, tint < 0.3 && tint > 0.15 ? 0.85 : 1, tint > 0.85 ? 0.8 : 1);
     }
     starGeo.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
-    this.stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: false, transparent: true, depthWrite: false }));
+    starGeo.setAttribute('star', new THREE.Float32BufferAttribute(ss, 2));
+    starGeo.setAttribute('scolor', new THREE.Float32BufferAttribute(sc, 3));
+    const starMat = new THREE.ShaderMaterial({
+      uniforms: { time: worldUniforms.time, opacity: { value: 1 }, pxRatio: { value: this.renderer.getPixelRatio() } },
+      transparent: true, depthWrite: false, fog: false,
+      vertexShader: /* glsl */`attribute vec2 star; attribute vec3 scolor; uniform float time; uniform float pxRatio; varying float vTw; varying vec3 vC;
+void main(){ vTw = 0.65 + 0.35 * sin(time * (1.5 + star.y) + star.y * 7.0); vC = scolor; gl_PointSize = star.x * pxRatio * (0.8 + 0.3 * vTw); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: /* glsl */`uniform float opacity; varying float vTw; varying vec3 vC; void main(){ gl_FragColor = vec4(vC, opacity * vTw);
+  #include <colorspace_fragment>
+}`,
+    });
+    this.stars = new THREE.Points(starGeo, starMat);
     this.skyGroup = new THREE.Group();
     this.skyGroup.add(this.sun, this.moon, this.stars);
     this.scene.add(this.skyGroup);
-    // clouds: blocky texture on a big plane
-    const cc = document.createElement('canvas'); cc.width = cc.height = 128;
-    g = cc.getContext('2d');
-    const r = Math.random;
-    for (let i = 0; i < 70; i++) { g.fillStyle = 'rgba(255,255,255,0.9)'; const x = (r() * 128) | 0, y = (r() * 128) | 0; g.fillRect(x, y, 4 + ((r() * 14) | 0), 3 + ((r() * 8) | 0)); }
-    const ct = new THREE.CanvasTexture(cc); ct.magFilter = ct.minFilter = THREE.NearestFilter; ct.wrapS = ct.wrapT = THREE.RepeatWrapping; ct.repeat.set(4, 4);
-    this.clouds = new THREE.Mesh(new THREE.PlaneGeometry(2048, 2048), new THREE.MeshBasicMaterial({ map: ct, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide, fog: false }));
-    this.clouds.rotation.x = -Math.PI / 2;
-    this.clouds.position.y = 130;
-    this.scene.add(this.clouds);
+    // clouds: volumetric block clouds
+    this.clouds = new Clouds(this.scene, 20251);
     this.skyDome = makeSkyDome(worldUniforms);
     this.scene.add(this.skyDome);
     const N = 1600;
@@ -166,6 +194,12 @@ class Game {
     this.scene.add(this.crack);
     this.hand = new THREE.Group();
     this.handScene.add(this.hand);
+    // flames at the edges of the screen while the player burns
+    this.fireOverlay = new THREE.Group();
+    const fm = makeFireMaterial(worldUniforms); fm.uniforms.opacity.value = 0.8;
+    for (const sx of [-1, 1]) { const m = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.55), fm); m.position.set(sx * 0.46, -0.42, -0.6); m.rotation.y = -sx * 0.55; this.fireOverlay.add(m); }
+    this.fireOverlay.visible = false;
+    this.handScene.add(this.fireOverlay);
   }
 
   // ---------------------------------------------------------------- title & world selection
@@ -1390,13 +1424,11 @@ class Game {
       this.sun.position.set(sx, sy, sz); this.sun.lookAt(new THREE.Vector3());
       this.moon.position.set(-sx, -sy, -sz); this.moon.lookAt(new THREE.Vector3());
       this.sun.material.opacity = 1 - rain; this.moon.material.opacity = 1 - rain;
-      this.stars.material.opacity = Math.max(0, 1 - bright * 1.5) * (1 - rain);
+      this.stars.material.uniforms.opacity.value = Math.max(0, 1 - bright * 1.5) * (1 - rain);
+      this.moon.material.map = this.moonTex[Math.floor((this.time + 6000) / 24000) % 8];
+      this.sunHalo.material.opacity = (1 - rain) * (0.6 + 0.4 * Math.max(0, 1 - Math.abs(Math.sin(angle)) * 3));
       this.skyGroup.visible = true;
-      this.clouds.visible = this.options.clouds;
-      this.clouds.position.set(cam.x, 130, cam.z);
-      this.clouds.material.map.offset.set((cam.x / 2048 * 4) + this.time * 0.00002, cam.z / 2048 * 4);
-      this.clouds.material.color.setScalar((0.3 + 0.7 * bright) * (1 - rain * 0.45));
-      this.clouds.material.opacity = 0.8 + rain * 0.2;
+      this.clouds.update(cam, dt, bright, rain, this.options.clouds);
       this.ambient.intensity = (0.25 + 0.5 * bright) * (1 - rain * 0.3);
       this.sunLight.intensity = (0.2 + 0.5 * bright) * (1 - rain * 0.5);
     } else {
@@ -1404,15 +1436,23 @@ class Game {
       U.daylight.value = 0;
       U.hasSky.value = 0;
       U.sunColor.value.setRGB(0, 0, 0);
-      const c = new THREE.Color(d === 'nether' ? 0x3a0d0d : 0x15101e);
+      // each Nether biome has its own haze; blend towards it as the player moves
+      let target = d === 'nether' ? 0x3a0d0d : 0x15101e;
+      if (d === 'nether' && this.player) {
+        const bi = this.world.biomeAt(Math.floor(this.player.pos.x), Math.floor(this.player.pos.z));
+        target = bi === 22 ? 0x4a0c0c : bi === 23 ? 0x0e2a2e : bi === 24 ? 0x1a3038 : bi === 25 ? 0x4a4450 : 0x3a0d0d;
+      }
+      this.netherFog ??= new THREE.Color(target);
+      this.netherFog.lerp(new THREE.Color(target), Math.min(1, dt * 0.8));
+      const c = this.netherFog.clone();
       if (this.player?.headInLava) c.set(0xc04000);
       fog.copy(c);
       U.skyColor.value.copy(c);
       this.scene.background = c;
       this.skyDome.visible = false;
       this.skyGroup.visible = d === 'end';
-      if (d === 'end') { this.skyGroup.position.copy(this.camera.position); this.sun.visible = this.moon.visible = false; this.stars.material.opacity = 0.5; }
-      this.clouds.visible = false;
+      if (d === 'end') { this.skyGroup.position.copy(this.camera.position); this.sun.visible = this.moon.visible = false; this.stars.material.uniforms.opacity.value = 0.5; }
+      this.clouds.update(this.camera.position, dt, 0, 0, false);
       this.ambient.intensity = 0.55; this.sunLight.intensity = 0.25;
     }
     if (d === 'overworld') { this.sun.visible = this.moon.visible = true; }
@@ -1425,7 +1465,52 @@ class Game {
   }
 
   // ---------------------------------------------------------------- weather
+  /** a jagged, branching bolt from the clouds to (x, y, z), visible for a few flickers */
+  spawnLightning(x, y, z) {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshBasicMaterial({ color: 0xe8ecff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+    const seg = (a, b, w) => {
+      const d = b.clone().sub(a), len = d.length();
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, len, w), mat);
+      m.position.copy(a).add(b).multiplyScalar(0.5);
+      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
+      g.add(m);
+    };
+    const bolt = (from, toY, w, branches) => {
+      let p = from.clone();
+      while (p.y > toY) {
+        const n = new THREE.Vector3(p.x + (Math.random() - 0.5) * 3, Math.max(toY, p.y - 3 - Math.random() * 4), p.z + (Math.random() - 0.5) * 3);
+        seg(p, n, w);
+        if (branches && Math.random() < 0.18) bolt(n, Math.max(toY, n.y - 10 - Math.random() * 20), w * 0.6, false);
+        p = n;
+      }
+      return p;
+    };
+    // the main channel ends exactly at the strike point
+    const top = new THREE.Vector3(x + (Math.random() - 0.5) * 16, Math.max(y + 60, 150), z + (Math.random() - 0.5) * 16);
+    const end = bolt(top, y + 4, 0.35, true);
+    seg(end, new THREE.Vector3(x, y, z), 0.35);
+    g.userData.life = 0.45;
+    this.scene.add(g);
+    (this.bolts ??= []).push(g);
+    for (let i = 0; i < 16; i++) this.particles.spawn(x, y + 0.2, z, new THREE.Color(0xd8e0ff), new THREE.Vector3((Math.random() - 0.5) * 6, Math.random() * 5, (Math.random() - 0.5) * 6), 0.4, 0.07, 8, { glow: true });
+    // anything standing there gets struck
+    for (const e of this.entities) if (e.hurt && !e.dead && Math.hypot(e.pos.x - x, e.pos.z - z) < 2.5 && Math.abs(e.pos.y - y) < 4) { e.hurt(5, null); if (e.fire != null) e.fire = 8; }
+    const pl = this.player;
+    if (pl && !pl.dead && pl.mode === 'survival' && Math.hypot(pl.pos.x - x, pl.pos.z - z) < 2.5 && Math.abs(pl.pos.y - y) < 4) { pl.hurt(5, 'lightning'); if (!pl.hasEffect('fire_resistance')) pl.fire = 8; }
+  }
+  updateBolts(dt) {
+    if (!this.bolts?.length) return;
+    for (const b of this.bolts) {
+      b.userData.life -= dt;
+      b.visible = b.userData.life > 0 && Math.random() > 0.3; // flicker
+      if (b.userData.life <= 0) { this.scene.remove(b); b.traverse((o) => o.geometry?.dispose()); }
+    }
+    this.bolts = this.bolts.filter((b) => b.userData.life > 0);
+  }
+
   updateWeather(dt) {
+    this.updateBolts(dt);
     const wx = this.weather;
     if (!this.player || this.dim !== 'overworld') { this.precip.visible = false; return; }
     wx.timer -= dt;
@@ -1443,7 +1528,11 @@ class Game {
       // lightning may ignite the ground near the player
       const p = this.player;
       const lx = Math.floor(p.pos.x + (Math.random() - 0.5) * 60), lz = Math.floor(p.pos.z + (Math.random() - 0.5) * 60);
-      if (this.world.isLoaded(lx, lz)) { const ly = this.world.surfaceY(lx, lz); if (ly > 0 && !this.world.getBlock(lx, ly + 1, lz)) this.world.setBlock(lx, ly + 1, lz, B.fire); }
+      if (this.world.isLoaded(lx, lz)) {
+        const ly = this.world.surfaceY(lx, lz);
+        this.spawnLightning(lx + 0.5, ly + 1, lz + 0.5);
+        if (ly > 0 && !this.world.getBlock(lx, ly + 1, lz)) this.world.setBlock(lx, ly + 1, lz, B.fire);
+      }
     }
     const rain = wx.rain;
     const pts = this.precip;
@@ -1466,6 +1555,11 @@ class Game {
       if (snow) { x += Math.sin(this.time * 0.05 + i) * dt * 0.6; }
       const ground = this.dropGround[i] ?? -999;
       if (far || y < ground || y < p.y - 12) {
+        // the drop hit something: a tiny splash where it landed
+        if (!snow && !far && y < ground && ground > -900 && Math.random() < 0.4) {
+          const wet = this.world.getBlock(Math.floor(x), Math.floor(ground - 1), Math.floor(z)) === B.water;
+          for (let k = 0; k < (wet ? 1 : 2); k++) this.particles.spawn(x, ground + 0.03, z, new THREE.Color(wet ? 0xc8dcff : 0x9ab4e0), new THREE.Vector3((Math.random() - 0.5) * 1.2, 1 + Math.random(), (Math.random() - 0.5) * 1.2), 0.25, 0.04, 9);
+        }
         x = p.x + (Math.random() - 0.5) * 36; z = p.z + (Math.random() - 0.5) * 36; y = p.y + 8 + Math.random() * 14;
         const gx = Math.floor(x), gz = Math.floor(z);
         let top = this.world.isLoaded(gx, gz) ? this.world.surfaceY(gx, gz) + 1 : -999;
@@ -1513,7 +1607,9 @@ class Game {
       this.camera.lookAt(eye);
     } else {
       this.camera.position.set(eye.x + bobX * Math.cos(p.yaw), eye.y + bobY, eye.z - bobX * Math.sin(p.yaw));
-      this.camera.rotation.set(p.pitch, p.yaw, 0);
+      // hurt shake: the view tilts sideways for a moment when damaged
+      const ht = p.hurtTime > 0 && p.health > 0 ? Math.sin((0.5 - p.hurtTime) / 0.5 * Math.PI) : 0;
+      this.camera.rotation.set(p.pitch, p.yaw, ht * 0.12 * (this.options.bobbing ? 1 : 0.4));
     }
     let fov = this.options.fov;
     if (p.sprinting) fov *= 1.12;
@@ -1537,6 +1633,12 @@ class Game {
 
   updateHand(dt) {
     const p = this.player;
+    const burning = !!p && p.fire > 0 && !p.inWater && p.mode !== 'creative' && p.mode !== 'spectator';
+    this.fireOverlay.visible = burning && !this.thirdPerson && !this.hideHud;
+    if (this.playerModel) {
+      if (burning && !this.playerFire) { this.playerFire = makeFireShell(worldUniforms, 0.6, 1.8); this.playerModel.root.add(this.playerFire); }
+      if (this.playerFire) this.playerFire.visible = burning && !!this.thirdPerson;
+    }
     this.hand.visible = !!p && !this.thirdPerson && p.mode !== 'spectator' && !this.hideHud;
     if (!this.hand.visible) return;
     const held = p.heldItem();
@@ -1666,6 +1768,7 @@ class Game {
     }
     if (this.touchControls) this.touchControls.show(this.touch && this.running && !!this.player && !this.ui.isOpen() && !this.hideHud);
     if (this.panorama) this.time = 3000;
+    if (this.running && this.world && this.player) this.ambientFx.update(dt);
     this.particles.update(dt);
     this.loadChunksAround();
     const pp = this.player?.pos ?? this.camera.position;
@@ -1695,7 +1798,7 @@ class Game {
       this.pipeline.renderScene(this.scene, this.camera, sunPos, sunVisible && this.weather.rain < 0.5, !!this.player?.headInWater);
       this.renderer.setRenderTarget(null);
     } else this.renderer.render(this.scene, this.camera);
-    if (this.player && this.hand.visible) {
+    if (this.player && (this.hand.visible || this.fireOverlay.visible)) {
       this.renderer.clearDepth();
       this.handCamera.fov = 70;
       this.renderer.render(this.handScene, this.handCamera);
@@ -1733,8 +1836,25 @@ function disposeTree(o) {
 }
 
 // ---------------------------------------------------------------- particles
+// One instanced mesh for every particle: cheap enough for thousands of ambient particles.
+// spawn(x, y, z, color, vel, life, size, gravity, opts) — opts: { drag, glow, shrink, collide, grow }
+const MAX_PARTICLES = 3000;
 class Particles {
-  constructor(game) { this.game = game; this.list = []; this.geo = new THREE.BoxGeometry(1, 1, 1); this.colorCache = new Map(); }
+  constructor(game) {
+    this.game = game; this.colorCache = new Map();
+    this.mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }), MAX_PARTICLES);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_PARTICLES * 3), 3);
+    this.mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.frustumCulled = false; this.mesh.count = 0;
+    game.scene.add(this.mesh);
+    const F = (n) => new Float32Array(MAX_PARTICLES * n);
+    this.p = F(3); this.v = F(3); this.c = F(3); this.life = F(1); this.max = F(1); this.size = F(1); this.grav = F(1); this.drag = F(1);
+    this.flags = new Uint8Array(MAX_PARTICLES); // 1 collide, 2 shrink, 4 glow, 8 grow
+    this.n = 0;
+    this.tmpC = new THREE.Color();
+  }
+  get list() { return { length: this.n }; }
   colorOf(id) {
     if (this.colorCache.has(id)) return this.colorCache.get(id);
     const b = BLOCKS[id];
@@ -1752,43 +1872,101 @@ class Particles {
     this.colorCache.set(id, color);
     return color;
   }
-  spawn(x, y, z, color, vel, life, size = 0.08, gravity = 12) {
-    if (this.list.length > 400) return;
-    const m = new THREE.Mesh(this.geo, new THREE.MeshBasicMaterial({ color }));
-    m.scale.setScalar(size);
-    m.position.set(x, y, z);
-    this.game.scene.add(m);
-    this.list.push({ m, vel, life, gravity });
+  /** brightness of the world at a point (particles are unlit otherwise) */
+  lightAt(x, y, z) {
+    const w = this.game.world;
+    if (!w) return 1;
+    const l = w.getLight(Math.floor(x), Math.floor(y), Math.floor(z));
+    const sky = (l >> 4) / 15 * (w.hasSky ? this.game.daylightLevel : 0), blk = (l & 15) / 15;
+    return Math.max(0.12, Math.max(sky, blk * 0.95));
+  }
+  spawn(x, y, z, color, vel, life, size = 0.08, gravity = 12, opts = {}) {
+    if (this.n >= MAX_PARTICLES) return;
+    const i = this.n++, i3 = i * 3;
+    const col = typeof color === 'number' ? this.tmpC.set(color) : color;
+    const lit = opts.glow ? 1 : this.lightAt(x, y, z);
+    this.p[i3] = x; this.p[i3 + 1] = y; this.p[i3 + 2] = z;
+    this.v[i3] = vel?.x ?? 0; this.v[i3 + 1] = vel?.y ?? 0; this.v[i3 + 2] = vel?.z ?? 0;
+    this.c[i3] = col.r * lit; this.c[i3 + 1] = col.g * lit; this.c[i3 + 2] = col.b * lit;
+    this.life[i] = life; this.max[i] = life; this.size[i] = size; this.grav[i] = gravity; this.drag[i] = opts.drag ?? 0;
+    this.flags[i] = ((opts.collide ?? gravity > 0) ? 1 : 0) | ((opts.shrink ?? true) ? 2 : 0) | (opts.grow ? 8 : 0);
   }
   blockBreak(x, y, z, id) {
     const c = this.colorOf(id);
-    for (let i = 0; i < 16; i++) {
-      const col = c.clone().multiplyScalar(0.8 + Math.random() * 0.4);
-      this.spawn(x + Math.random(), y + Math.random(), z + Math.random(), col, new THREE.Vector3((Math.random() - 0.5) * 4, Math.random() * 4, (Math.random() - 0.5) * 4), 0.6 + Math.random() * 0.5, 0.1);
+    for (let i = 0; i < 24; i++) {
+      const col = c.clone().multiplyScalar(0.75 + Math.random() * 0.5);
+      this.spawn(x + Math.random(), y + Math.random(), z + Math.random(), col, new THREE.Vector3((Math.random() - 0.5) * 4, Math.random() * 4, (Math.random() - 0.5) * 4), 0.6 + Math.random() * 0.6, 0.06 + Math.random() * 0.06);
     }
+  }
+  /** small chips while a block is being mined */
+  blockHit(x, y, z, id, face) {
+    const c = this.colorOf(id);
+    const px = x + 0.5 + (face?.[0] ?? 0) * 0.52 + (face?.[0] ? 0 : (Math.random() - 0.5)), py = y + 0.5 + (face?.[1] ?? 0) * 0.52 + (face?.[1] ? 0 : (Math.random() - 0.5)), pz = z + 0.5 + (face?.[2] ?? 0) * 0.52 + (face?.[2] ? 0 : (Math.random() - 0.5));
+    this.spawn(px, py, pz, c.clone().multiplyScalar(0.8 + Math.random() * 0.4), new THREE.Vector3((face?.[0] ?? 0) * 1.5 + (Math.random() - 0.5), 1 + Math.random(), (face?.[2] ?? 0) * 1.5 + (Math.random() - 0.5)), 0.5, 0.05 + Math.random() * 0.03);
   }
   explosion(x, y, z, power) {
     const lum = this.game.world?.hasSky ? 0.35 + 0.55 * this.game.daylightLevel : 0.5;
-    for (let i = 0; i < 10 * power; i++) {
+    for (let i = 0; i < 16 * power; i++) {
       const g = (0.45 + Math.random() * 0.35) * lum;
-      this.spawn(x + (Math.random() - 0.5) * power * 1.5, y + (Math.random() - 0.5) * power * 1.5, z + (Math.random() - 0.5) * power * 1.5, new THREE.Color(g, g, g), new THREE.Vector3((Math.random() - 0.5) * 2, 0.5 + Math.random() * 1.5, (Math.random() - 0.5) * 2), 0.4 + Math.random() * 0.6, 0.12 + Math.random() * 0.2, -0.5);
+      this.spawn(x + (Math.random() - 0.5) * power * 1.5, y + (Math.random() - 0.5) * power * 1.5, z + (Math.random() - 0.5) * power * 1.5, new THREE.Color(g, g, g), new THREE.Vector3((Math.random() - 0.5) * 2, 0.5 + Math.random() * 1.5, (Math.random() - 0.5) * 2), 0.5 + Math.random() * 0.8, 0.15 + Math.random() * 0.3, -0.5, { glow: true, drag: 1, grow: true });
     }
+    // flash of fire at the centre
+    for (let i = 0; i < 8 * power; i++) this.spawn(x + (Math.random() - 0.5) * power, y + (Math.random() - 0.5) * power, z + (Math.random() - 0.5) * power, new THREE.Color().setHSL(0.08 + Math.random() * 0.05, 1, 0.55 + Math.random() * 0.2), new THREE.Vector3((Math.random() - 0.5) * 6, Math.random() * 4, (Math.random() - 0.5) * 6), 0.25 + Math.random() * 0.25, 0.2 + Math.random() * 0.2, 0, { glow: true, drag: 3 });
   }
-  burst(x, y, z, color) { for (let i = 0; i < 10; i++) this.spawn(x + (Math.random() - 0.5), y + (Math.random() - 0.5), z + (Math.random() - 0.5), new THREE.Color(color), new THREE.Vector3(0, 1, 0), 1, 0.08, 0); }
+  burst(x, y, z, color) { for (let i = 0; i < 10; i++) this.spawn(x + (Math.random() - 0.5), y + (Math.random() - 0.5), z + (Math.random() - 0.5), new THREE.Color(color), new THREE.Vector3(0, 1, 0), 1, 0.08, 0, { glow: true }); }
+  /** white puff when a mob dies */
+  poof(x, y, z, w = 0.6, h = 1.8) {
+    for (let i = 0; i < 20; i++) { const g = 0.75 + Math.random() * 0.25; this.spawn(x + (Math.random() - 0.5) * w * 1.5, y + Math.random() * h, z + (Math.random() - 0.5) * w * 1.5, new THREE.Color(g, g, g), new THREE.Vector3((Math.random() - 0.5) * 0.8, 0.4 + Math.random() * 0.6, (Math.random() - 0.5) * 0.8), 0.6 + Math.random() * 0.5, 0.12 + Math.random() * 0.12, -0.3, { drag: 1.5, grow: true }); }
+  }
+  /** crit stars around a target */
+  crit(x, y, z, magic = false) {
+    for (let i = 0; i < 14; i++) { const d = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.8, Math.random() - 0.5).normalize().multiplyScalar(3 + Math.random() * 2); this.spawn(x, y, z, magic ? new THREE.Color(0x7ad0ff) : new THREE.Color(0xd8d0b0), d, 0.5 + Math.random() * 0.3, 0.07, 4, { glow: true, drag: 3 }); }
+  }
+  /** dust kicked up by feet (sprinting / landing) */
+  dust(x, y, z, id, n = 1, spread = 0.3, up = 1.2) {
+    if (!id) return;
+    const c = this.colorOf(id);
+    for (let i = 0; i < n; i++) this.spawn(x + (Math.random() - 0.5) * spread * 2, y + 0.05, z + (Math.random() - 0.5) * spread * 2, c.clone().multiplyScalar(0.8 + Math.random() * 0.3), new THREE.Vector3((Math.random() - 0.5) * 2, Math.random() * up + 0.4, (Math.random() - 0.5) * 2), 0.4 + Math.random() * 0.4, 0.05 + Math.random() * 0.05);
+  }
   update(dt) {
-    for (const p of this.list) {
-      p.life -= dt;
-      p.vel.y -= p.gravity * dt;
-      p.m.position.addScaledVector(p.vel, dt);
-      if (this.game.world && p.gravity > 0) {
-        const id = this.game.world.getBlock(Math.floor(p.m.position.x), Math.floor(p.m.position.y), Math.floor(p.m.position.z));
-        if (SOLID[id]) { p.vel.set(0, 0, 0); }
+    const w = this.game.world, P = this.p, V = this.v, arr = this.mesh.instanceMatrix.array, col = this.mesh.instanceColor.array;
+    let k = 0;
+    for (let i = 0; i < this.n; i++) {
+      const i3 = i * 3;
+      this.life[i] -= dt;
+      if (this.life[i] <= 0) continue;
+      V[i3 + 1] -= this.grav[i] * dt;
+      const d = this.drag[i]; if (d) { const f = Math.max(0, 1 - d * dt); V[i3] *= f; V[i3 + 1] *= f; V[i3 + 2] *= f; }
+      let nx = P[i3] + V[i3] * dt, ny = P[i3 + 1] + V[i3 + 1] * dt, nz = P[i3 + 2] + V[i3 + 2] * dt;
+      if ((this.flags[i] & 1) && w && SOLID[w.getBlock(Math.floor(nx), Math.floor(ny), Math.floor(nz))]) {
+        // stop on contact (keep the old position, like the original game's particles)
+        V[i3] = V[i3 + 1] = V[i3 + 2] = 0; nx = P[i3]; ny = P[i3 + 1]; nz = P[i3 + 2];
       }
+      // compact into slot k
+      const k3 = k * 3;
+      P[k3] = nx; P[k3 + 1] = ny; P[k3 + 2] = nz;
+      if (k !== i) {
+        V[k3] = V[i3]; V[k3 + 1] = V[i3 + 1]; V[k3 + 2] = V[i3 + 2];
+        this.c[k3] = this.c[i3]; this.c[k3 + 1] = this.c[i3 + 1]; this.c[k3 + 2] = this.c[i3 + 2];
+        this.life[k] = this.life[i]; this.max[k] = this.max[i]; this.size[k] = this.size[i]; this.grav[k] = this.grav[i]; this.drag[k] = this.drag[i]; this.flags[k] = this.flags[i];
+      }
+      const t = this.life[k] / this.max[k], fl = this.flags[k];
+      let s = this.size[k];
+      if (fl & 8) s *= 0.6 + (1 - t) * 0.8; else if (fl & 2) s *= Math.min(1, 0.25 + t * 1.2);
+      const m = k * 16;
+      arr[m] = s; arr[m + 1] = 0; arr[m + 2] = 0; arr[m + 3] = 0;
+      arr[m + 4] = 0; arr[m + 5] = s; arr[m + 6] = 0; arr[m + 7] = 0;
+      arr[m + 8] = 0; arr[m + 9] = 0; arr[m + 10] = s; arr[m + 11] = 0;
+      arr[m + 12] = nx; arr[m + 13] = ny; arr[m + 14] = nz; arr[m + 15] = 1;
+      col[k3] = this.c[k3]; col[k3 + 1] = this.c[k3 + 1]; col[k3 + 2] = this.c[k3 + 2];
+      k++;
     }
-    for (const p of this.list) if (p.life <= 0) { this.game.scene.remove(p.m); p.m.material.dispose(); }
-    this.list = this.list.filter((p) => p.life > 0);
+    this.n = k;
+    this.mesh.count = k;
+    this.mesh.instanceMatrix.needsUpdate = true;
+    this.mesh.instanceColor.needsUpdate = true;
   }
-  clear() { for (const p of this.list) { this.game.scene.remove(p.m); p.m.material.dispose(); } this.list = []; }
+  clear() { this.n = 0; this.mesh.count = 0; }
 }
 
 // ---------------------------------------------------------------- logo
@@ -1829,7 +2007,7 @@ function drawLogo(c) {
 
 // ---------------------------------------------------------------- storage helpers
 function loadOptions() {
-  const def = { fov: 70, renderDistance: IS_TOUCH ? 4 : 6, sensitivity: 100, volume: 60, guiScale: IS_TOUCH ? (Math.min(innerWidth, innerHeight) < 500 ? 1.5 : 2) : 2, difficulty: 'normal', bobbing: true, clouds: !IS_TOUCH, shaders: false, fancy: false };
+  const def = { fov: 70, renderDistance: IS_TOUCH ? 4 : 6, sensitivity: 100, volume: 60, guiScale: IS_TOUCH ? (Math.min(innerWidth, innerHeight) < 500 ? 1.5 : 2) : 2, difficulty: 'normal', bobbing: true, clouds: !IS_TOUCH, shaders: false, fancy: false, particles: true };
   try { return { ...def, ...JSON.parse(localStorage.getItem('mc_options') || '{}') }; } catch { return def; }
 }
 function listWorlds() { try { return JSON.parse(localStorage.getItem('mc_worlds') || '[]').sort((a, b) => b.lastPlayed - a.lastPlayed); } catch { return []; } }
