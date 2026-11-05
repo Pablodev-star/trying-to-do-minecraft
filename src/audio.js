@@ -98,6 +98,10 @@ export function playSound(name, vol = 1) {
       break;
     }
     case 'piston': burst({ freq: 400, q: 1.5, dur: 0.15, vol: 0.25 }); tone({ freq: 160, freq2: 120, dur: 0.1, vol: 0.1, type: 'square' }); break;
+    case 'fire': burst({ freq: 1800 * r, q: 0.6, dur: 0.05, vol: 0.06 * vol }); burst({ freq: 900 * r, q: 0.5, dur: 0.2, vol: 0.05 * vol, type: 'lowpass', at: 0.04 }); break;
+    case 'splash': burst({ freq: 1200 * r, q: 0.4, dur: 0.45, vol: 0.25 * vol, type: 'lowpass' }); burst({ freq: 4000, q: 0.5, dur: 0.25, vol: 0.12 * vol, type: 'highpass', at: 0.02 }); break;
+    case 'lava_pop': tone({ freq: 160 * r, freq2: 420, dur: 0.07, vol: 0.12 * vol, type: 'sine' }); break;
+    case 'portal_hum': tone({ freq: 90 * r, freq2: 140, dur: 2.2, vol: 0.05 * vol, type: 'sine' }); break;
     case 'rain': burst({ freq: 7000, q: 0.3, dur: 0.4, vol: 0.035 * vol, type: 'highpass' }); break;
     case 'thunder': burst({ freq: 120, q: 0.3, dur: 2.8, vol: 0.9 * vol, type: 'lowpass' }); burst({ freq: 400, q: 0.4, dur: 1.2, vol: 0.35 * vol, at: 0.05 }); burst({ freq: 90, q: 0.3, dur: 2.0, vol: 0.5 * vol, type: 'lowpass', at: 0.6 }); break;
     case 'dragon': tone({ freq: 90, freq2: 60, dur: 1.5, vol: 0.3, type: 'sawtooth' }); break;

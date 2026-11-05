@@ -534,7 +534,7 @@ export class World {
           if (nid === id && !b.opaque && !(this.game?.options?.fancy && b.tint?.startsWith('foliage'))) continue; // glass/ice (and leaves on "fast" graphics)
           const tex = texFor(b, f, meta);
           const tint = b.tint && (b.tint !== 'grass_top' || F.side === 'top') ? tintFor(b.tint, x, z) : null;
-          emitFace(buf, F, x, y, z, tex, tint, getP, getL, [0, 0, 0, 1, 1, 1], false, false, b.tint?.startsWith('foliage') ? 1 : 0);
+          emitFace(buf, F, x, y, z, tex, tint, getP, getL, [0, 0, 0, 1, 1, 1], false, false, b.tint?.startsWith('foliage') ? 1 : b.anim === 4 ? 8 : 0);
         }
       } else if (b.render === 'liquid') {
         const above = getP(x, y + 1, z);
@@ -551,7 +551,8 @@ export class World {
       } else if (b.render === 'cross') {
         const tex = id >= B.wheat_0 && id <= B.potatoes_7 ? b.name : b.tex;
         const tint = b.tint ? tintFor(b.tint, x, z) : null;
-        emitCross(buf, x, y, z, tex, tint, getL(x, y, z), id === B.fire || id === B.cobweb ? 0 : 2);
+        if (id === B.fire) emitFire(buf, x, y, z, getL(x, y, z), getP(x, y - 1, z));
+        else emitCross(buf, x, y, z, tex, tint, getL(x, y, z), id === B.cobweb ? 0 : 2);
       } else if (b.render === 'box' || b.render === 'portal') {
         let boxes;
         if (b.render === 'portal') boxes = [meta & 1 ? [0.375, 0, 0, 0.625, 1, 1] : [0, 0, 0.375, 1, 1, 0.625]];
@@ -742,6 +743,38 @@ function emitFace(buf, F, x, y, z, tex, tint, getP, getL, box, noAO = false, fla
   // flip quad diagonal for nicer AO interpolation
   if (ao0 + ao2 < ao1 + ao3) buf.ind.push(base + 1, base + 2, base + 3, base + 1, base + 3, base);
   else buf.ind.push(base, base + 1, base + 2, base, base + 2, base + 3);
+}
+
+// Fire: four planes (two diagonals and two leaning sheets) drawn with procedural flames in
+// the shader (mat 6, or 7 = blue soul fire on soul sand / soul soil). Taller than a block.
+function emitFire(buf, x, y, z, l, below) {
+  const [u0, v0, us] = tileUV('fire');
+  const mat = below === B.soul_sand || below === B.soul_soil ? 7 : 6;
+  const H = 1.0;
+  const quads = [
+    [[0.05, 0, 0.05], [0.95, 0, 0.95], [0.95, H, 0.95], [0.05, H, 0.05]],
+    [[0.95, 0, 0.05], [0.05, 0, 0.95], [0.05, H, 0.95], [0.95, H, 0.05]],
+    [[0, 0, 0.2], [1, 0, 0.2], [1, H, 0.45], [0, H, 0.45]],
+    [[1, 0, 0.8], [0, 0, 0.8], [0, H, 0.55], [1, H, 0.55]],
+  ];
+  const uvs = [[0, 1], [1, 1], [1, 0], [0, 0]];
+  const bl = (l >> 4) / 15, bb = Math.max(l & 15, 15) / 15;
+  for (let qi = 0; qi < quads.length; qi++) for (const flip of [false, true]) {
+    const q = quads[qi], base = buf.pos.length / 3;
+    // each plane uses a different half of the tile so neighbouring sheets do not flicker in sync
+    const ua = qi & 1 ? 0.5 : 0, ub = ua + 0.5;
+    for (let k = 0; k < 4; k++) {
+      const p = q[k];
+      buf.pos.push(x + p[0], y + p[1], z + p[2]);
+      buf.uv.push(u0 + (0.001 + (uvs[k][0] ? ub : ua) * 0.998) * us, v0 + (0.001 + uvs[k][1] * 0.998) * us);
+      buf.light.push(bl, bb);
+      buf.col.push(1, 1, 1);
+      buf.nrm.push(0, 1, 0);
+      buf.mat.push(mat);
+    }
+    if (flip) buf.ind.push(base, base + 2, base + 1, base, base + 3, base + 2);
+    else buf.ind.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
 }
 
 function emitCross(buf, x, y, z, tex, tint, l, mat = 2) {

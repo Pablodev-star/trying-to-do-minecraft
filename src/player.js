@@ -333,7 +333,7 @@ export class Player {
         const d = this.fallStart - this.pos.y - 3;
         const landed = w.getBlock(Math.floor(this.pos.x), Math.floor(this.pos.y - 0.2), Math.floor(this.pos.z));
         if (d > 0 && this.mode === 'survival' && landed !== B.hay_block && landed !== B.water) this.hurt(Math.ceil(d), 'fall');
-        if (d > 0) this.game.sfx('land');
+        if (d > 0) { this.game.sfx('land'); this.game.particles.dust(this.pos.x, this.pos.y, this.pos.z, landed, Math.min(40, 6 + Math.ceil(d * 4)), 0.5, 1.5); }
         this.fallStart = null;
       }
       this.bob += Math.hypot(this.vel.x, this.vel.z) * dt * (ground ? 1 : 0);
@@ -485,7 +485,7 @@ export class Player {
     this.mining.progress += b.hardness === 0 ? 1 : perSec * dt;
     this.mining.sound += dt;
     this.swing = 1;
-    if (this.mining.sound > 0.25) { this.mining.sound = 0; this.game.sfx('dig:' + b.sound); }
+    if (this.mining.sound > 0.25) { this.mining.sound = 0; this.game.sfx('dig:' + b.sound); this.game.particles.blockHit(h.x, h.y, h.z, h.id, h.face); this.game.particles.blockHit(h.x, h.y, h.z, h.id, h.face); }
     this.exhaustion += 0.005 * dt;
     if (this.mining.progress >= 1) {
       this.game.breakBlock(h.x, h.y, h.z, canHarvest);
@@ -521,7 +521,8 @@ export class Player {
     if (e instanceof Mob) e.looting = enchLevel(held, 'looting');
     if (e.hurt(dmg, this, dir)) {
       const fa = enchLevel(held, 'fire_aspect'); if (fa && e.fire != null) e.fire = Math.max(e.fire, 4 * fa);
-      if (crit) this.game.sfx('crit');
+      if (crit) { this.game.sfx('crit'); this.game.particles.crit(e.pos.x, e.pos.y + (e.info?.h ?? 1) * 0.7, e.pos.z); }
+      if (sh || enchLevel(held, 'smite') || enchLevel(held, 'bane_of_arthropods')) this.game.particles.crit(e.pos.x, e.pos.y + (e.info?.h ?? 1) * 0.7, e.pos.z, true);
       this.exhaustion += 0.1;
       if (it?.durability) this.damageHeld(it.toolType === 'sword' ? 1 : 2);
     }
